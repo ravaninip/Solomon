@@ -1,0 +1,54 @@
+name: Bug report
+description: Something does not work as expected
+labels: [bug]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for taking the time to report a problem! Please fill in as much as you can.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: Describe the problem and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: steps
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. Load Solomon on a MIDI track
+        2. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Solomon version
+      placeholder: e.g. v0.1.0 or commit hash
+    validations:
+      required: true
+  - type: input
+    id: host
+    attributes:
+      label: DAW and version
+      placeholder: e.g. Ableton Live 12.1.5
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options: [Windows 11, Windows 10, macOS (Apple Silicon), macOS (Intel), Other]
+    validations:
+      required: true
+  - type: dropdown
+    id: format
+    attributes:
+      label: Plugin format
+      options: [VST3, AU]
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs, screenshots or files
+      description: For crashes attach Live's `Log.txt`. You can also attach the exported .mid files.
