@@ -11,6 +11,9 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   LFO and a 4 x 4 modulation matrix.
 - Band-limited resampling from the 48 kHz core to any host sample rate.
 - Automatable parameters, MIDI (notes, bend, mod wheel, aftertouch, sustain), resizable editor.
+- Presets: 13 factory presets, user presets saved as files, previous/next buttons.
+- Editor: control names that follow the selected oscillator model, live filter response curve, envelope
+  shape views, voice lamps and output meter, live modulation source bars, bipolar matrix sliders.
 - Vendored MIT-licensed oscillator code with a reproducible import script.
 - Initial project structure.
 

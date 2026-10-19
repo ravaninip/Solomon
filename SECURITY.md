@@ -40,7 +40,11 @@ ISO/IEC 29147 and the EU Cyber Resilience Act.
   run under AddressSanitizer and UndefinedBehaviorSanitizer in CI.
 - **Real-time safety.** The audio thread never blocks: it exchanges data with the UI through atomics
   (and, where needed, a lock-free FIFO or a try-lock).
-- **File access.** The plug-in does not read or write files of its own; session data is handled by the host.
+- **File access.** Session data is handled by the host. The only files the plug-in touches are user presets
+  (`*.solomonpreset`) in its own folder (`%APPDATA%\Solomon\Presets`, `~/Library/Application Support/Solomon/Presets`,
+  `~/.config/Solomon/Presets`): they are written only there, with file names cleaned so a name can never point
+  outside the folder, and every preset file is read through the same size, structure and range checks as a host
+  session. It never executes files.
 - **Supply chain.** Dependencies are pinned (`SOLOMON_JUCE_TAG`; the vendored oscillator code is pinned by commit
   in `tools/vendor_mutable.sh` and each file keeps its license header), GitHub Actions are pinned to commit SHAs
   and kept up to date by Dependabot, and the workflow token is read-only by default. Third-party components

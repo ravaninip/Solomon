@@ -89,6 +89,7 @@ SolomonProcessor::SolomonProcessor()
             p.mod[s][d] = get (modId (s, d));
 
     mono.assign (4096, 0.0f);
+    apvts.state.setProperty ("preset", "Init", nullptr);      // a new instance starts from the default sound
 }
 
 Params SolomonProcessor::readParams() const
