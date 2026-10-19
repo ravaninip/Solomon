@@ -12,10 +12,36 @@ option(SOLOMON_COPY_AFTER_BUILD "Copy the plugin into the user's VST3/AU folder 
 set(SOLOMON_JUCE_PATH "" CACHE PATH "Path to a local JUCE checkout (empty = download from GitHub)")
 set(SOLOMON_JUCE_TAG "8.0.15" CACHE STRING "JUCE tag to download")
 
-# ---------------------------------------------------------------- engine (pure C++, no JUCE)
+# ---------------------------------------------------------------- third-party DSP (MIT)
+# Oscillator models from the open-source Plaits code base and its stmlib helpers, vendored in
+# third_party/mutable (see its README). stmlib selects its desktop code paths with the TEST macro,
+# so every translation unit that includes these headers must define it consistently: that is the
+# vendored sources and Source/Engine/PlaitsOscillator.cc only (no other file includes them).
+file(STRINGS third_party/mutable/MANIFEST.txt SOLOMON_MUTABLE_FILES)
+set(SOLOMON_MUTABLE_SOURCES "")
+foreach(f IN LISTS SOLOMON_MUTABLE_FILES)
+    if(f MATCHES "\\.cc$")
+        list(APPEND SOLOMON_MUTABLE_SOURCES third_party/mutable/${f})
+    endif()
+endforeach()
+add_library(solomon_mutable STATIC ${SOLOMON_MUTABLE_SOURCES})
+target_include_directories(solomon_mutable PUBLIC third_party/mutable)
+target_compile_definitions(solomon_mutable PRIVATE TEST)
+set_target_properties(solomon_mutable PROPERTIES POSITION_INDEPENDENT_CODE ON)
+if(MSVC)
+    target_compile_options(solomon_mutable PRIVATE /W0 /utf-8)
+else()
+    target_compile_options(solomon_mutable PRIVATE -w)
+endif()
+
+# ---------------------------------------------------------------- synth engine (no JUCE)
 add_library(solomon_engine STATIC
-    Source/Engine/Engine.cpp)
+    Source/Engine/PlaitsOscillator.cc
+    Source/Engine/Resampler.cc
+    Source/Engine/Synth.cc)
 target_include_directories(solomon_engine PUBLIC Source)
+target_link_libraries(solomon_engine PRIVATE solomon_mutable)
+set_source_files_properties(Source/Engine/PlaitsOscillator.cc PROPERTIES COMPILE_DEFINITIONS TEST)
 set_target_properties(solomon_engine PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
     target_compile_options(solomon_engine PRIVATE /utf-8)
