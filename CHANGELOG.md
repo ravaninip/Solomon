@@ -16,6 +16,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
   shape views, voice lamps and output meter, live modulation source bars, bipolar matrix sliders.
 - Colour themes: three built-in themes, a theme menu in the editor and user themes loaded from JSON files
   (strictly validated, readability-checked), designed with the separate Theme Studio.
+- Layouts: every element of the editor can be moved, resized or hidden by a layout file made with the Theme
+  Studio; a *Layout* menu, strict validation, and a command that lists all elements for the Studio.
 - Vendored MIT-licensed oscillator code with a reproducible import script.
 - Windows build: GCC-only attributes in the vendored oscillator code are removed on MSVC.
 - Initial project structure.

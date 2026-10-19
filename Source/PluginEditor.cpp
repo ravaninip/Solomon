@@ -100,6 +100,7 @@ double parseValue (const juce::String& text)
 SolomonEditor::Knob& SolomonEditor::addKnob (const juce::String& paramId, const juce::String& text, const juce::String& tip, bool horizontal)
 {
     auto k = std::make_unique<Knob>();
+    k->paramId = paramId;
     if (horizontal)
     {
         k->slider.setSliderStyle (juce::Slider::LinearHorizontal);
@@ -126,6 +127,7 @@ SolomonEditor::Knob& SolomonEditor::addKnob (const juce::String& paramId, const 
 SolomonEditor::Choice& SolomonEditor::addChoice (const juce::String& paramId, const juce::String& text, const juce::String& tip)
 {
     auto c = std::make_unique<Choice>();
+    c->paramId = paramId;
     if (auto* prm = dynamic_cast<juce::AudioParameterChoice*> (proc.apvts.getParameter (paramId)))
         c->box.addItemList (prm->choices, 1);
     c->box.setTooltip (tip);
@@ -231,6 +233,12 @@ SolomonEditor::SolomonEditor (SolomonProcessor& p)
     applyTheme();
     ThemeManager::shared().addChangeListener (this);
 
+    layoutButton.setTooltip ("Layout of the interface. Make your own with the Theme Studio.");
+    layoutButton.onClick = [this] { showLayoutMenu(); };
+    addAndMakeVisible (layoutButton);
+    layouts().addChangeListener (this);
+    registerElements();
+
     updateModelLabels();
 
     setResizable (true, true);
@@ -244,6 +252,7 @@ SolomonEditor::~SolomonEditor()
 {
     stopTimer();
     ThemeManager::shared().removeChangeListener (this);
+    layouts().removeChangeListener (this);
     setLookAndFeel (nullptr);
 }
 
@@ -251,13 +260,20 @@ void SolomonEditor::paint (juce::Graphics& g)
 {
     g.fillAll (T().background);
     g.setColour (T().panel);
-    for (auto r : panels)
-        g.fillRoundedRectangle (r.toFloat(), T().panelRadius);
+    for (size_t i = 0; i < panels.size(); ++i)
+        if (i >= panelShown.size() || panelShown[i])
+            g.fillRoundedRectangle (panels[i].toFloat(), T().panelRadius);
 }
 
 // ------------------------------------------------------------------------ themes
-void SolomonEditor::changeListenerCallback (juce::ChangeBroadcaster*)
+void SolomonEditor::changeListenerCallback (juce::ChangeBroadcaster* source)
 {
+    if (source == &layouts())
+    {
+        resized();
+        repaint();
+        return;
+    }
     applyTheme();
     rebuildThemeMenu();
 }
@@ -425,6 +441,254 @@ void SolomonEditor::askToSavePreset()
     }), true);
 }
 
+// ------------------------------------------------------------------------ user layouts
+LayoutManager& SolomonEditor::layouts()
+{
+    static LayoutManager instance ("Solomon", kBaseWidth, kBaseHeight,
+                                   ThemeManager::defaultFolder().getSiblingFile ("Layouts"),
+                                   ThemeManager::defaultFolder().getSiblingFile ("layout.txt"));
+    return instance;
+}
+
+void SolomonEditor::placePresetBar (juce::Rectangle<int> area)
+{
+    auto line = area.removeFromTop (32);
+    prevButton.setBounds (line.removeFromLeft (30));
+    line.removeFromLeft (4);
+    nextButton.setBounds (line.removeFromRight (30));
+    line.removeFromRight (4);
+    saveButton.setBounds (line.removeFromRight (62));
+    line.removeFromRight (4);
+    presetBox.setBounds (line);
+    presetNote.setBounds (area.removeFromTop (18));
+}
+
+void SolomonEditor::addKnobElement (const juce::String& id, const juce::String& parent, Knob& k, const juce::String& label)
+{
+    const bool hasLabel = ! k.slider.isHorizontal();          // rotary knobs have a name above them
+    Element e;
+    e.id = id; e.type = k.slider.isHorizontal() ? "slider" : "knob"; e.label = label; e.param = k.paramId; e.parent = parent;
+    e.current = [&k, hasLabel] { return hasLabel ? k.label.getBounds().getUnion (k.slider.getBounds().expanded (2)) : k.slider.getBounds(); };
+    e.place = [&k, hasLabel] (juce::Rectangle<int> r)
+    {
+        if (hasLabel) { k.label.setBounds (r.removeFromTop (16)); k.slider.setBounds (r.reduced (2)); }
+        else          { k.slider.setBounds (r); }
+    };
+    e.show = [&k] (bool b) { k.slider.setVisible (b); k.label.setVisible (b); };
+    e.shown = [&k] { return k.slider.isVisible(); };
+    addElement (std::move (e));
+}
+
+void SolomonEditor::addMenuElement (const juce::String& id, const juce::String& parent, Choice& c, const juce::String& label, bool hasLabel)
+{
+    Element e;
+    e.id = id; e.type = "menu"; e.label = label; e.param = c.paramId; e.parent = parent;
+    e.current = [&c, hasLabel] { return hasLabel ? c.label.getBounds().getUnion (c.box.getBounds()) : c.box.getBounds(); };
+    e.place = [&c, hasLabel] (juce::Rectangle<int> r)
+    {
+        if (hasLabel) c.label.setBounds (r.removeFromTop (16));
+        c.box.setBounds (r);
+    };
+    e.show = [&c, hasLabel] (bool b) { c.box.setVisible (b); if (hasLabel) c.label.setVisible (b); };
+    e.shown = [&c] { return c.box.isVisible(); };
+    addElement (std::move (e));
+}
+
+void SolomonEditor::addComponentElement (const juce::String& id, const juce::String& type, const juce::String& label,
+                                         const juce::String& parent, juce::Component& c, bool locked)
+{
+    Element e;
+    e.id = id; e.type = type; e.label = label; e.parent = parent; e.locked = locked;
+    e.current = [&c] { return c.getBounds(); };
+    e.place = [&c] (juce::Rectangle<int> r) { c.setBounds (r); };
+    e.show = [&c] (bool b) { c.setVisible (b); };
+    e.shown = [&c] { return c.isVisible(); };
+    addElement (std::move (e));
+}
+
+void SolomonEditor::registerElements()
+{
+    // panels, in the order resized() builds them
+    static const char* panelIds[6] = { "panel.osc", "panel.filter", "panel.lfo", "panel.ampEnv", "panel.fltEnv", "panel.matrix" };
+    static const char* panelNames[6] = { "Oscillator", "Filter", "LFO", "Amp envelope", "Filter envelope", "Modulation matrix" };
+    for (size_t i = 0; i < 6; ++i)
+    {
+        Element e;
+        e.id = panelIds[i]; e.type = "panel"; e.label = panelNames[i];
+        e.current = [this, i] { return i < panels.size() ? panels[i] : juce::Rectangle<int>(); };
+        e.place = [this, i] (juce::Rectangle<int> r) { if (i < panels.size()) panels[i] = r; };
+        e.show = [this, i] (bool b) { panelShown[i] = b; };
+        e.shown = [this, i] { return (bool) panelShown[i]; };
+        addElement (std::move (e));
+    }
+
+    // top bar
+    addComponentElement ("title", "label", "Title", "", title);
+    addComponentElement ("theme", "menu", "Theme", "", themeBox, true);
+    addComponentElement ("layout", "menu", "Layout", "", layoutButton, true);
+    {
+        Element e;
+        e.id = "preset"; e.type = "group"; e.label = "Presets";
+        e.current = [this] { return prevButton.getBounds().getUnion (nextButton.getBounds()).getUnion (presetBox.getBounds())
+                                        .getUnion (saveButton.getBounds()).getUnion (presetNote.getBounds()); };
+        e.place = [this] (juce::Rectangle<int> r) { placePresetBar (r); };
+        e.show = [this] (bool b) { for (auto* c : std::initializer_list<juce::Component*> { &prevButton, &nextButton, &presetBox, &saveButton, &presetNote }) c->setVisible (b); };
+        e.shown = [this] { return presetBox.isVisible(); };
+        addElement (std::move (e));
+    }
+    addMenuElement ("model", "", *model, "Oscillator model", true);
+    addComponentElement ("meter", "meter", "Voices and level", "", voiceMeter);
+    addKnobElement ("knob.volume", "", *volume, "Volume");
+
+    // oscillator
+    addComponentElement ("header.osc", "label", "Oscillator header", "panel.osc", oscHeader);
+    addKnobElement ("knob.harmonics", "panel.osc", *harmonics, "Harmonics");
+    addKnobElement ("knob.timbre", "panel.osc", *timbre, "Timbre");
+    addKnobElement ("knob.morph", "panel.osc", *morph, "Morph");
+    addKnobElement ("knob.tune", "panel.osc", *tune, "Tune");
+
+    // filter
+    addComponentElement ("header.filter", "label", "Filter header", "panel.filter", filterHeader);
+    addMenuElement ("menu.filterMode", "panel.filter", *filterMode, "Filter type", false);
+    addComponentElement ("graph.filter", "graph", "Filter response", "panel.filter", filterCurve);
+    addKnobElement ("knob.cutoff", "panel.filter", *cutoff, "Cutoff");
+    addKnobElement ("knob.resonance", "panel.filter", *resonance, "Resonance");
+
+    // LFO
+    addComponentElement ("header.lfo", "label", "LFO header", "panel.lfo", lfoHeader);
+    addMenuElement ("menu.lfoShape", "panel.lfo", *lfoShape, "LFO shape", false);
+    addKnobElement ("knob.lfoRate", "panel.lfo", *lfoRate, "LFO rate");
+
+    // envelopes
+    addComponentElement ("header.ampEnv", "label", "Amp envelope header", "panel.ampEnv", ampHeader);
+    addComponentElement ("graph.ampEnv", "graph", "Amp envelope shape", "panel.ampEnv", ampView);
+    addComponentElement ("header.fltEnv", "label", "Filter envelope header", "panel.fltEnv", fltEnvHeader);
+    addComponentElement ("graph.fltEnv", "graph", "Filter envelope shape", "panel.fltEnv", fltView);
+    {
+        Knob* amp[4] = { ampA, ampD, ampS, ampR };
+        Knob* flt[4] = { fltA, fltD, fltS, fltR };
+        static const char* stage[4] = { "A", "D", "S", "R" };
+        for (int i = 0; i < 4; ++i)
+        {
+            addKnobElement ("knob.amp" + juce::String (stage[i]), "panel.ampEnv", *amp[i], "Amp " + juce::String (stage[i]));
+            addKnobElement ("knob.flt" + juce::String (stage[i]), "panel.fltEnv", *flt[i], "Filter " + juce::String (stage[i]));
+        }
+    }
+
+    // modulation matrix
+    static const char* srcNames[kNumModSources] = { "LFO", "Envelope", "Velocity", "Pressure" };
+    static const char* dstNames[kNumModDests] = { "Timbre", "Morph", "Harmonics", "Cutoff" };
+    addComponentElement ("header.matrix", "label", "Matrix header", "panel.matrix", matrixHeader);
+    for (int s = 0; s < kNumModSources; ++s)
+    {
+        addComponentElement ("matrix.src." + juce::String (s), "label", srcNames[s], "panel.matrix", sourceLabels[s]);
+        addComponentElement ("matrix.bar." + juce::String (s), "meter", juce::String (srcNames[s]) + " level", "panel.matrix", *sourceBars[(size_t) s]);
+    }
+    for (int d = 0; d < kNumModDests; ++d)
+        addComponentElement ("matrix.dst." + juce::String (d), "label", dstNames[d], "panel.matrix", destLabels[d]);
+    for (int s = 0; s < kNumModSources; ++s)
+        for (int d = 0; d < kNumModDests; ++d)
+            addKnobElement ("matrix.cell." + juce::String (s) + "." + juce::String (d), "panel.matrix", *mod[s][d],
+                            juce::String (srcNames[s]) + " to " + dstNames[d]);
+}
+
+void SolomonEditor::applyLayout()
+{
+    const auto& layout = layouts().current();
+    const double scale = (double) getWidth() / kBaseWidth;
+    for (auto& e : elements)
+    {
+        const auto it = layoutEnabled ? layout.entries.find (e.id) : layout.entries.end();
+        if (it == layout.entries.end())
+        {
+            e.show (true);                                      // not mentioned: the built-in design decides
+            continue;
+        }
+        const auto& b = it->second.bounds;
+        e.place (juce::Rectangle<float> ((float) (b.getX() * scale), (float) (b.getY() * scale),
+                                         (float) (b.getWidth() * scale), (float) (b.getHeight() * scale)).toNearestInt());
+        e.show (e.locked || it->second.visible);
+    }
+    themeBox.toFront (false);                                   // whatever the layout does, these two stay usable
+    layoutButton.toFront (false);
+    repaint();
+}
+
+bool SolomonEditor::elementInfo (const juce::String& id, juce::Rectangle<int>& bounds, bool& visible) const
+{
+    for (const auto& e : elements)
+        if (e.id == id) { bounds = e.current(); visible = e.shown(); return true; }
+    return false;
+}
+
+juce::String SolomonEditor::describeLayout()
+{
+    layoutEnabled = false;
+    resized();
+    const double scale = (double) kBaseWidth / (double) getWidth();
+    juce::Array<juce::var> list;
+    for (const auto& e : elements)
+    {
+        const auto b = e.current();
+        auto* o = new juce::DynamicObject();
+        o->setProperty ("id", e.id);
+        o->setProperty ("type", e.type);
+        o->setProperty ("label", e.label);
+        if (e.param.isNotEmpty())  o->setProperty ("param", e.param);
+        if (e.parent.isNotEmpty()) o->setProperty ("parent", e.parent);
+        if (e.locked)              o->setProperty ("locked", true);
+        o->setProperty ("x", juce::roundToInt (b.getX() * scale));
+        o->setProperty ("y", juce::roundToInt (b.getY() * scale));
+        o->setProperty ("w", juce::roundToInt (b.getWidth() * scale));
+        o->setProperty ("h", juce::roundToInt (b.getHeight() * scale));
+        list.add (juce::var (o));
+    }
+    layoutEnabled = true;
+    resized();
+
+    auto* root = new juce::DynamicObject();
+    root->setProperty ("format", "plugin-layout-descriptor");
+    root->setProperty ("version", 1);
+    root->setProperty ("plugin", "Solomon");
+    root->setProperty ("baseWidth", kBaseWidth);
+    root->setProperty ("baseHeight", kBaseHeight);
+    root->setProperty ("elements", list);
+    return juce::JSON::toString (juce::var (root), false);
+}
+
+void SolomonEditor::showLayoutMenu()
+{
+    auto& lm = layouts();
+    juce::PopupMenu menu;
+    menu.addSectionHeader ("Layout");
+    const int current = lm.indexOf (lm.current().name);
+    for (int i = 0; i < (int) lm.layouts().size(); ++i)
+        menu.addItem (i + 1, lm.layouts()[(size_t) i].name, true, i == current);
+    menu.addSeparator();
+    menu.addItem (kThemeFolderItem, "Open layouts folder...");
+    menu.addItem (kThemeReloadItem, "Reload layouts");
+
+    juce::Component::SafePointer<SolomonEditor> safe (this);
+    menu.showMenuAsync (juce::PopupMenu::Options().withTargetComponent (&layoutButton), [safe] (int id)
+    {
+        if (safe == nullptr || id == 0) return;
+        auto& manager = layouts();
+        if (id == kThemeFolderItem)
+        {
+            manager.folder().createDirectory();
+            manager.folder().revealToUser();
+        }
+        else if (id == kThemeReloadItem)
+        {
+            manager.refresh();
+            safe->say (manager.problems().isEmpty() ? "Layouts reloaded" : "Ignored: " + manager.problems()[0]);
+            manager.sendSynchronousChangeMessage();
+        }
+        else if (id <= (int) manager.layouts().size())
+            manager.select (manager.layouts()[(size_t) (id - 1)].name);
+    });
+}
+
 // ------------------------------------------------------------------------ layout
 void SolomonEditor::layoutRow (juce::Rectangle<int> area, std::vector<Knob*> row)
 {
@@ -447,20 +711,12 @@ void SolomonEditor::resized()
     auto top = area.removeFromTop (74);
     auto titleArea = top.removeFromLeft (150);
     title.setBounds (titleArea.removeFromTop (44));
-    themeBox.setBounds (titleArea.removeFromTop (24).withTrimmedRight (8));
+    auto lookRow = titleArea.removeFromTop (24);
+    layoutButton.setBounds (lookRow.removeFromRight (52));
+    lookRow.removeFromRight (4);
+    themeBox.setBounds (lookRow.withTrimmedRight (6));
 
-    auto presetArea = top.removeFromLeft (330).withTrimmedTop (4);
-    {
-        auto line = presetArea.removeFromTop (32);
-        prevButton.setBounds (line.removeFromLeft (30));
-        line.removeFromLeft (4);
-        nextButton.setBounds (line.removeFromRight (30));
-        line.removeFromRight (4);
-        saveButton.setBounds (line.removeFromRight (62));
-        line.removeFromRight (4);
-        presetBox.setBounds (line);
-        presetNote.setBounds (presetArea.removeFromTop (18));
-    }
+    placePresetBar (top.removeFromLeft (330).withTrimmedTop (4));
     top.removeFromLeft (12);
 
     auto vol = top.removeFromRight (90);
@@ -553,4 +809,6 @@ void SolomonEditor::resized()
             }
         }
     }
+
+    applyLayout();
 }
