@@ -6,6 +6,11 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 
 ## [Unreleased]
 
+### Changed
+- Knobs now have the same size everywhere (as large as their area allows, up to a maximum) instead of filling
+  whatever space the panel left, which made the LFO knob much larger than the others. In a layout, a knob sits
+  in the middle of its rectangle.
+
 ### Added
 - Four-voice paraphonic synthesizer with 17 oscillator models, multi-mode filter, two ADSR envelopes,
   LFO and a 4 x 4 modulation matrix.

@@ -644,6 +644,13 @@ int main (int argc, char** argv)
                 EXPECT (parent.isEmpty() || parent.startsWith ("panel."));
             }
             EXPECT (panelsSeen == 6 && locked == 2);
+            // every knob has the same size, except where its area is smaller than the largest dial
+            int knobs = 0, largest = 0, atLargest = 0;
+            for (const auto& item : *list)
+                if (item.getProperty ("type", {}).toString() == "knob") { ++knobs; largest = juce::jmax (largest, (int) item["h"]); }
+            for (const auto& item : *list)
+                if (item.getProperty ("type", {}).toString() == "knob" && (int) item["h"] == largest) ++atLargest;
+            EXPECT (knobs == 16 && atLargest >= 12);
             for (auto id : { "knob.cutoff", "matrix.cell.3.3", "theme", "layout", "graph.filter", "panel.matrix" })
                 EXPECT (ids.contains (id));
             // every parameter that has a knob or a menu appears exactly once
@@ -684,19 +691,23 @@ int main (int argc, char** argv)
 
             auto* editor = static_cast<SolomonEditor*> (ed.get());
             juce::Rectangle<int> b; bool shown = false;
-            EXPECT (editor->elementInfo ("knob.cutoff", b, shown) && shown && b == juce::Rectangle<int> (20, 30, 100, 110));
+            const juce::Rectangle<int> cutoffArea (20, 30, 100, 110);
+            EXPECT (editor->elementInfo ("knob.cutoff", b, shown) && shown && cutoffArea.contains (b)          // a knob sits in the middle of its area
+                    && std::abs (b.getCentreX() - cutoffArea.getCentreX()) <= 1 && std::abs (b.getCentreY() - cutoffArea.getCentreY()) <= 1);
+            const auto firstSize = b;
             EXPECT (editor->elementInfo ("matrix.cell.0.0", b, shown) && ! shown);
             EXPECT (editor->elementInfo ("matrix.cell.0.1", b, shown) && shown);                       // untouched elements stay
             EXPECT (editor->elementInfo ("theme", b, shown) && shown && b == juce::Rectangle<int> (300, 300, 90, 24));
             EXPECT (editor->elementInfo ("panel.osc", b, shown) && shown && b == juce::Rectangle<int> (500, 100, 200, 200));
             EXPECT (! editor->elementInfo ("not.an.element", b, shown));
             ed->setSize (1960, 1440);                                                                  // scaled with the window
-            EXPECT (editor->elementInfo ("knob.cutoff", b, shown) && b == juce::Rectangle<int> (40, 60, 200, 220));
+            EXPECT (editor->elementInfo ("knob.cutoff", b, shown) && juce::Rectangle<int> (40, 60, 200, 220).contains (b)
+                    && b.getHeight() >= firstSize.getHeight() * 15 / 10);                                                // grows with the window
             ed->setSize (980, 720);
 
             EXPECT (lm.select ("Default"));                                                            // back to the built-in design
             EXPECT (editor->elementInfo ("matrix.cell.0.0", b, shown) && shown);
-            EXPECT (editor->elementInfo ("knob.cutoff", b, shown) && b != juce::Rectangle<int> (20, 30, 100, 110));
+            EXPECT (editor->elementInfo ("knob.cutoff", b, shown) && ! cutoffArea.contains (b));
             file.deleteFile();
             lm.refresh();
             lm.select (originalLayout);
