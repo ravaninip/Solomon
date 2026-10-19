@@ -37,6 +37,7 @@ On Windows see [docs/BUILDING_WINDOWS.md](docs/BUILDING_WINDOWS.md).
 - Treat anything loaded from a project or received as MIDI as untrusted: clamp values and bound sizes.
 - Never allocate, lock or do file I/O on the audio thread (`processBlock`).
 - Do not add network access or telemetry.
+- Do not edit files under `third_party/` by hand: change `tools/vendor_mutable.sh` and re-run it, so the import stays reproducible and every local change is documented.
 - When writing about VST, follow the Steinberg VST Usage Guidelines: write "VST® 3" on first use, never
   coin variants such as "VSTi", and keep the trademark attribution.
 - Do not change `PLUGIN_MANUFACTURER_CODE` or `PLUGIN_CODE` in `CMakeLists.txt`: hosts would no longer

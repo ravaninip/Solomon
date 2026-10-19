@@ -7,6 +7,7 @@ following third-party components. Versions are pinned in `CMakeLists.txt` (`SOLO
 | :--- | :--- | :--- | :--- |
 | [JUCE](https://github.com/juce-framework/JUCE) | 8.0.15 | [AGPLv3](https://github.com/juce-framework/JUCE/blob/master/LICENSE.md) (or commercial) | Plug-in framework, UI |
 | [VST 3 SDK](https://github.com/steinbergmedia/vst3sdk) (bundled in JUCE) | 3.8.0 | [MIT](https://github.com/steinbergmedia/vst3sdk/blob/master/LICENSE.txt) | VST 3 plug-in format |
+| [Plaits oscillator code](https://github.com/pichenettes/eurorack) and [stmlib](https://github.com/pichenettes/stmlib) (vendored in `third_party/mutable`) | pinned in `tools/vendor_mutable.sh` | MIT, Copyright Emilie Gillet | Oscillator models and DSP helpers |
 | [AudioUnitSDK](https://github.com/apple/AudioUnitSDK) (bundled in JUCE, macOS only) | as bundled | Apache 2.0 | AU plug-in format |
 | [HarfBuzz](https://github.com/harfbuzz/harfbuzz) (bundled in JUCE) | as bundled | Old MIT | Text shaping |
 | [SheenBidi](https://github.com/Tehreer/SheenBidi) (bundled in JUCE) | as bundled | Apache 2.0 | Bidirectional text |

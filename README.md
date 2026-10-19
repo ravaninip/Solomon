@@ -8,9 +8,13 @@
 <img src="docs/images/VST_Compatible_Logo_Steinberg_with_TM.png" alt="VST Compatible" width="110" align="right" />
 
 **Solomon is a hybrid digital synthesizer with a modulation matrix, available as a VST® 3 and Audio Unit plug-in.**
+It combines 17 oscillator models (virtual analog, phase distortion, FM, wavetable, granular, additive, strings, chords and more) with a multi-mode filter, two envelopes, an LFO and a 4 × 4 modulation matrix, in a four-voice paraphonic design.
 
-<!-- Add a screenshot: run the smoke test with a path, copy it to docs/images/screenshot.png -->
-<!-- <p align="center"><img src="docs/images/screenshot.png" alt="Solomon plug-in window" width="820" /></p> -->
+Everything runs offline: no network access, no telemetry, no accounts.
+
+<p align="center">
+  <img src="docs/images/screenshot.png" alt="Solomon plug-in window: oscillator model selector, harmonics/timbre/morph controls, filter, LFO, two ADSR envelopes and the 4 by 4 modulation matrix" width="820" />
+</p>
 
 ## Table Of Contents
 
@@ -28,9 +32,11 @@
 ## The Solomon package
 
 ```
-Source/Engine/     pure C++ engine (no JUCE, unit-testable)
-Source/            JUCE plug-in (processor, editor)
+Source/Engine/     synth engine in pure C++ (no JUCE): oscillator wrapper, resampler, filter, envelopes, LFO, voices
+Source/            JUCE plug-in (parameters, MIDI, state, editor)
+third_party/       vendored oscillator code (MIT), with its own README and license notices
 Tests/             engine tests and host-less plug-in smoke test
+tools/             maintenance scripts (re-importing the vendored code)
 docs/              additional documentation
 ```
 
@@ -44,7 +50,31 @@ docs/              additional documentation
 
 ## Features
 
-- TODO
+- **17 oscillator models** with three macro controls (*Harmonics*, *Timbre*, *Morph*) whose meaning
+  depends on the model: Analog + Filter, Phase Distortion, Wave Terrain, String Machine, Chiptune,
+  Virtual Analog, Waveshaper, FM, Granular, Additive, Wavetable, Chords, Swarm, Noise, Particles,
+  Plucked String and Modal Resonator.
+- **Paraphonic, 4 voices:** each voice has its own oscillator and amplitude envelope; filter, filter
+  envelope and LFO are shared. Oldest-note voice stealing, sustain pedal.
+- **Multi-mode filter** (low-, band-, high-pass) with resonance that stays stable under fast modulation.
+- **Two ADSR envelopes** (amplitude and filter) and a **tempo-free LFO** (sine, triangle, saw, square,
+  sample & hold).
+- **4 × 4 modulation matrix:** LFO, filter envelope, velocity and pressure (aftertouch or mod wheel)
+  to Timbre, Morph, Harmonics and Cutoff.
+- **MIDI:** sample-accurate notes, velocity, pitch bend (±2 semitones), mod wheel, channel and
+  polyphonic aftertouch, sustain pedal, all-notes-off.
+- All controls are **automatable** parameters and are saved with the project.
+- **Any sample rate:** the engine runs at 48 kHz internally and is converted to the host rate with a
+  band-limited resampler (verified at 22.05 to 192 kHz).
+- **Presets:** 13 factory starting points (Init, Analog Bass, Sync Lead, Warm Strings, Glass Keys, Bell Tower,
+  Pluck, Wavetable Sweep, Organ Chords, Chip Arp, Swarm Cloud, Wind, Pressure Pad) and your own user presets
+  (*Save* button). User presets are plain files, so they can be shared; they live in
+  `%APPDATA%\Solomon\Presets` (Windows), `~/Library/Application Support/Solomon/Presets` (macOS) or
+  `~/.config/Solomon/Presets` (Linux).
+- **An interface that tells you what is going on:** the three macro knobs are named after what they do in the
+  selected model; a live filter response curve (set cut-off and modulated cut-off); the shape of both
+  envelopes; lamps for the four voices and an output level meter; live bars for every modulation source.
+- **Resizable interface** with tooltips.
 
 ## Installation
 
@@ -104,10 +134,21 @@ ctest --test-dir build --output-on-failure
 
 ## Known limitations
 
-- TODO
+- Version 0.x: the factory presets are starting points that have been level-checked by automated tests but not
+  yet refined by ear; expect to adjust them.
+- The six-operator FM models, the speech model and the drum models of the original oscillator
+  code are intentionally not included.
+- Voice stealing retriggers the pitch abruptly (no glide), so very dense chords played while all voices are
+  busy can click.
+- The plug-in has been tested host-less and with the VST 3 validator; please report anything that
+  behaves differently in your DAW.
 
 ## Roadmap
 
+- Preset categories, tags and a search field
+- Glide, unison and a cycling envelope
+- Arpeggiator and sequencer
+- Effects (delay, reverb)
 - Code-signed and notarised installers for Windows and macOS
 
 ## Contributing
@@ -124,6 +165,8 @@ Solomon makes no network connections and collects no data. To report a vulnerabi
 - **Solomon** is free software under the [GNU Affero General Public License v3.0](LICENSE).
 - It is built with [JUCE](https://juce.com) 8, used under the AGPLv3, which bundles the
   [VST 3 SDK](https://github.com/steinbergmedia/vst3sdk) (MIT license).
+- The oscillator models are derived from the MIT-licensed open-source code of the Plaits module by
+  Emilie Gillet (Mutable Instruments), see [third_party/mutable](third_party/mutable/README.md).
 - Third-party components and their licenses are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).
 
 ### Trademarks
@@ -131,5 +174,6 @@ Solomon makes no network connections and collects no data. To report a vulnerabi
 VST is a registered trademark of Steinberg Media Technologies GmbH.
 The VST Compatible Logo is used unaltered, in accordance with the
 [Steinberg VST Usage Guidelines](https://github.com/steinbergmedia/vst3sdk/blob/master/VST3_Usage_Guidelines.pdf).
-Audio Units is a trademark of Apple Inc. Solomon is an independent project and is not affiliated with or
-endorsed by Steinberg or Apple.
+Audio Units is a trademark of Apple Inc. Mutable Instruments and Plaits are names of their respective
+owner. Solomon is an independent project and is not affiliated with or endorsed by Steinberg, Apple or
+Mutable Instruments.
