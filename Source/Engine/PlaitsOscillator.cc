@@ -123,7 +123,11 @@ void PlaitsOscillator::render (int model, float note, float harmonics, float tim
     p.trigger = gate == Gate::Rising ? (plaits::TRIGGER_RISING_EDGE | plaits::TRIGGER_HIGH)
               : gate == Gate::High   ? plaits::TRIGGER_HIGH
                                      : plaits::TRIGGER_LOW;
-    p.note = std::isfinite (note) ? std::clamp (note, -119.0f, 120.0f) : 60.0f;
+    // The upstream pitch constant assumes the hardware's real sample rate (47872.34 Hz, see
+    // kCorrectedSampleRate in plaits/dsp/dsp.h). Our core runs at exactly 48000 Hz, so without this
+    // correction every note would be 4.6 cents sharp.
+    static const float kPitchCorrection = (float) (-12.0 * std::log2 (48000.0 / 47872.34));
+    p.note = (std::isfinite (note) ? std::clamp (note, -119.0f, 120.0f) : 60.0f) + kPitchCorrection;
     p.harmonics = clamp01 (harmonics);
     p.timbre = clamp01 (timbre);
     p.morph = clamp01 (morph);

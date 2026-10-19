@@ -33,13 +33,15 @@ ISO/IEC 29147 and the EU Cyber Resilience Act.
 
 - **No network access.** Solomon is built with `JUCE_WEB_BROWSER=0` and `JUCE_USE_CURL=0` and makes no
   network connections; it collects no telemetry or personal data.
-- **Untrusted input is bounded.** Plug-in state loaded from a project file is size-limited, every field is
-  range-checked, and note lists and positions are capped (see `engine::State::deserialize`). Tests cover hostile input,
-  and the engine tests run under AddressSanitizer and UndefinedBehaviorSanitizer in CI.
+- **Untrusted input is bounded.** A project's saved state is checked before it is parsed (size limit and
+  a limit on the number of XML tags, because the parser is recursive), restored through the host-parameter
+  system, and every value is clamped again (non-finite values replaced) before it reaches the audio engine
+  (`Params::sanitize`). Tests cover oversized, deeply nested and out-of-range states, and the engine tests
+  run under AddressSanitizer and UndefinedBehaviorSanitizer in CI.
 - **Real-time safety.** The audio thread never blocks: it exchanges data with the UI through atomics
   (and, where needed, a lock-free FIFO or a try-lock).
-- **File access.** The plug-in writes only to locations the user picks (and, if it offers drag-and-drop export,
-  to `<system temp>/Solomon`). It never executes files.
-- **Supply chain.** Dependencies are pinned (`SOLOMON_JUCE_TAG`), GitHub Actions are pinned to commit SHAs
+- **File access.** The plug-in does not read or write files of its own; session data is handled by the host.
+- **Supply chain.** Dependencies are pinned (`SOLOMON_JUCE_TAG`; the vendored oscillator code is pinned by commit
+  in `tools/vendor_mutable.sh` and each file keeps its license header), GitHub Actions are pinned to commit SHAs
   and kept up to date by Dependabot, and the workflow token is read-only by default. Third-party components
   are listed in [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md).

@@ -32,7 +32,10 @@ To change the set of models, edit `Source/Engine/PlaitsOscillator.cc` and regene
 
 `stmlib/utils/random.h` and `random.cc`: the generator state is `thread_local`. Upstream keeps it in
 a global, which would be shared (and raced on) by plug-in instances running on different audio threads.
-The script applies this change automatically.
+`plaits/resources.cc`: the unused, empty `lookup_table_i32_table[]` initialiser becomes `{ nullptr }`
+(a zero-size array is a GNU extension that MSVC rejects).
+
+The script applies both changes automatically.
 
 ## Build note
 

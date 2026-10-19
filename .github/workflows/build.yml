@@ -52,6 +52,28 @@ jobs:
       - name: Test (engine, plus plugin smoke test on Windows)
         run: ctest --test-dir build -C Release --output-on-failure
 
+      - name: Validate the VST 3 with pluginval (Windows)
+        if: matrix.name == 'windows'
+        shell: bash
+        run: |
+          curl -sSfL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_Windows.zip
+          echo "c08e61ce3b96db41636f8ec7e76f4c7e2c13ebdac7fa1b5a1f52b4f32ec715ab *pluginval.zip" | sha256sum -c -
+          unzip -q pluginval.zip
+          bundle="$(find build -type d -name Solomon.vst3 | head -1)"
+          echo "Validating $bundle"
+          ./pluginval.exe --strictness-level 10 --skip-gui-tests --validate-in-process --validate "$bundle"
+
+      - name: Validate the VST 3 with pluginval (macOS)
+        if: matrix.name == 'macos'
+        shell: bash
+        run: |
+          curl -sSfL -o pluginval.zip https://github.com/Tracktion/pluginval/releases/download/v1.0.4/pluginval_macOS.zip
+          echo "3c4c533bda0c5059eea3ddaea752d757ee2025041f0f47e6bcb0e87f6082b29f  pluginval.zip" | shasum -a 256 -c -
+          unzip -q pluginval.zip
+          bundle="$(find build -type d -name Solomon.vst3 | head -1)"
+          echo "Validating $bundle"
+          ./pluginval.app/Contents/MacOS/pluginval --strictness-level 10 --skip-gui-tests --validate-in-process --validate "$bundle"
+
       - name: Collect plugin bundles
         shell: bash
         run: |

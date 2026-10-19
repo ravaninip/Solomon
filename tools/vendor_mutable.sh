@@ -43,4 +43,8 @@ cp "$tmp/stmlib/LICENSE" "$dest/stmlib/LICENSE"
 sed -i 's/static uint32_t rng_state_;/static thread_local uint32_t rng_state_;/' "$dest/stmlib/utils/random.h"
 sed -i 's/^uint32_t Random::rng_state_/thread_local uint32_t Random::rng_state_/' "$dest/stmlib/utils/random.cc"
 
+# Local modification: an empty table initialiser is a zero-size array, which GCC accepts as an
+# extension but MSVC rejects. The table is declared in resources.h and never used.
+sed -z -i 's/lookup_table_i32_table\[\] = {\n};/lookup_table_i32_table[] = { nullptr };/' "$dest/plaits/resources.cc"
+
 echo "Vendored $(wc -l < "$dest/MANIFEST.txt") files from eurorack@${EURORACK_SHA:0:7} and stmlib@${STMLIB_SHA:0:7}"

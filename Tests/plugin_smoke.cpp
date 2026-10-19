@@ -1,56 +1,248 @@
-// Host-less smoke test: drives processor and editor without a DAW and saves a UI screenshot.
+// Host-less smoke test: drives the processor (audio, MIDI, parameters, state) and the editor without a
+// DAW, and can save a screenshot of the user interface.
 // Usage: solomon_plugin_smoke [screenshot.png]
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
+#include "StateGuard.h"
 
 #include <cmath>
 #include <cstdio>
+#include <string>
 
 static int g_fail = 0, g_checks = 0;
 #define EXPECT(...)                                                                       \
     do { ++g_checks; if (! (__VA_ARGS__)) { ++g_fail;                                     \
         std::printf ("  FAIL  %s:%d  %s\n", __FILE__, __LINE__, #__VA_ARGS__); } } while (0)
 
+namespace
+{
+float peak (const juce::AudioBuffer<float>& b)
+{
+    float p = 0.0f;
+    for (int ch = 0; ch < b.getNumChannels(); ++ch)
+        p = std::fmax (p, b.getMagnitude (ch, 0, b.getNumSamples()));
+    return p;
+}
+
+bool finite (const juce::AudioBuffer<float>& b)
+{
+    for (int ch = 0; ch < b.getNumChannels(); ++ch)
+        for (int i = 0; i < b.getNumSamples(); ++i)
+            if (! std::isfinite (b.getSample (ch, i))) return false;
+    return true;
+}
+
+void setParam (SolomonProcessor& p, const juce::String& id, float realValue)
+{
+    auto* prm = p.apvts.getParameter (id);
+    prm->setValueNotifyingHost (prm->convertTo0to1 (realValue));
+}
+
+float getParam (SolomonProcessor& p, const juce::String& id)
+{
+    return p.apvts.getRawParameterValue (id)->load();
+}
+} // namespace
+
 int main (int argc, char** argv)
 {
     juce::ScopedJuceInitialiser_GUI init;
 
-    SolomonProcessor p;
-    p.setRateAndBufferSizeDetails (44100.0, 512);
-    p.prepareToPlay (44100.0, 512);
-
-    juce::AudioBuffer<float> buf (2, 512);
-    juce::MidiBuffer midi;
-    midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
-    p.processBlock (buf, midi);
-    EXPECT (std::isfinite (buf.getMagnitude (0, 512)));
-
-    // state round trip through the host API, plus a hostile blob
-    p.gain.store (0.3f);
-    juce::MemoryBlock mb;
-    p.getStateInformation (mb);
-    SolomonProcessor q;
-    q.setStateInformation (mb.getData(), (int) mb.getSize());
-    EXPECT (std::abs (q.gain.load() - 0.3f) < 0.01f);
-    const char junk[] = "\xff\xfe garbage";
-    q.setStateInformation (junk, (int) sizeof (junk));
-    EXPECT (std::abs (q.gain.load() - 0.3f) < 0.01f);
-
-    // editor: create, resize, render to an image
+    std::puts ("processor: audio and MIDI");
+    for (auto cfg : { std::pair<double, int> { 44100.0, 512 }, { 48000.0, 37 }, { 96000.0, 1024 } })
     {
+        SolomonProcessor p;
+        p.setRateAndBufferSizeDetails (cfg.first, cfg.second);
+        p.prepareToPlay (cfg.first, cfg.second);
+        juce::AudioBuffer<float> buf (2, cfg.second);
+        juce::MidiBuffer midi;
+
+        buf.clear(); p.processBlock (buf, midi);
+        EXPECT (peak (buf) == 0.0f);                                       // silence without notes
+
+        midi.addEvent (juce::MidiMessage::noteOn (1, 57, (juce::uint8) 100), cfg.second / 2);
+        midi.addEvent (juce::MidiMessage::noteOn (1, 64, (juce::uint8) 100), cfg.second / 2);
+        buf.clear(); p.processBlock (buf, midi);
+        EXPECT (finite (buf));
+        EXPECT (buf.getSample (0, cfg.second / 2 - 1) == 0.0f);            // sample-accurate: nothing before the note
+
+        float level = 0.0f;
+        for (int i = 0; i < (int) cfg.first / cfg.second / 2; ++i)
+        {
+            juce::MidiBuffer none;
+            buf.clear(); p.processBlock (buf, none);
+            level = std::fmax (level, peak (buf));
+            EXPECT (finite (buf) && peak (buf) <= 1.0f);
+        }
+        EXPECT (level > 0.05f);
+        EXPECT (buf.getSample (0, 5) == buf.getSample (1, 5));             // same signal on both channels
+
+        // control change, aftertouch, bend, sustain must not upset anything
+        juce::MidiBuffer cc;
+        cc.addEvent (juce::MidiMessage::controllerEvent (1, 1, 127), 0);
+        cc.addEvent (juce::MidiMessage::controllerEvent (1, 64, 127), 1);
+        cc.addEvent (juce::MidiMessage::channelPressureChange (1, 90), 2);
+        cc.addEvent (juce::MidiMessage::pitchWheel (1, 16383), 3);
+        cc.addEvent (juce::MidiMessage::aftertouchChange (1, 60, 50), 4);
+        buf.clear(); p.processBlock (buf, cc);
+        EXPECT (finite (buf));
+
+        juce::MidiBuffer off;
+        off.addEvent (juce::MidiMessage::allNotesOff (1), 0);
+        off.addEvent (juce::MidiMessage::controllerEvent (1, 64, 0), 0);
+        buf.clear(); p.processBlock (buf, off);
+        for (int i = 0; i < (int) (cfg.first * 8) / cfg.second; ++i)
+        {
+            juce::MidiBuffer none;
+            buf.clear(); p.processBlock (buf, none);
+        }
+        EXPECT (peak (buf) < 1.0e-3f);                                     // released and silent again
+    }
+
+    std::puts ("processor: a host that exceeds the announced block size");
+    {
+        SolomonProcessor p;
+        p.setRateAndBufferSizeDetails (44100.0, 64);
+        p.prepareToPlay (44100.0, 64);
+        juce::AudioBuffer<float> big (2, 20000);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        big.clear(); p.processBlock (big, midi);
+        EXPECT (finite (big) && peak (big) > 0.01f);
+    }
+
+    std::puts ("processor: parameters and every oscillator model");
+    {
+        SolomonProcessor p;
+        p.setRateAndBufferSizeDetails (48000.0, 256);
+        p.prepareToPlay (48000.0, 256);
+        juce::AudioBuffer<float> buf (2, 256);
+        for (int model = 0; model < solomon::kNumModels; ++model)
+        {
+            setParam (p, "model", (float) model);
+            juce::MidiBuffer midi;
+            midi.addEvent (juce::MidiMessage::noteOn (1, 48, (juce::uint8) 110), 0);
+            float level = 0.0f;
+            for (int b = 0; b < 100; ++b)
+            {
+                buf.clear(); p.processBlock (buf, midi);
+                midi.clear();
+                level = std::fmax (level, peak (buf));
+                EXPECT (finite (buf));
+            }
+            EXPECT (level > 0.01f);
+            juce::MidiBuffer off;
+            off.addEvent (juce::MidiMessage::allNotesOff (1), 0);
+            buf.clear(); p.processBlock (buf, off);
+        }
+        EXPECT (p.apvts.getParameter ("mod_env_cutoff") != nullptr);
+        EXPECT (p.getTotalNumOutputChannels() == 2 && p.acceptsMidi() && ! p.producesMidi());
+    }
+
+    std::puts ("state: round trip and hostile blobs");
+    {
+        SolomonProcessor a;
+        setParam (a, "model", 9.0f);
+        setParam (a, "cutoff", 1234.0f);
+        setParam (a, "mod_lfo_timbre", -0.5f);
+        juce::MemoryBlock mb;
+        a.getStateInformation (mb);
+        EXPECT (mb.getSize() > 0 && mb.getSize() < solomon::kMaxStateBytes);
+
+        SolomonProcessor b;
+        b.setStateInformation (mb.getData(), (int) mb.getSize());
+        EXPECT ((int) getParam (b, "model") == 9);
+        EXPECT (std::abs (getParam (b, "cutoff") - 1234.0f) < 1.0f);
+        EXPECT (std::abs (getParam (b, "mod_lfo_timbre") + 0.5f) < 0.01f);
+
+        auto expectUnchanged = [&] (const void* data, int size, const char* what)
+        {
+            SolomonProcessor c;
+            const float before = getParam (c, "cutoff");
+            c.setStateInformation (data, size);
+            const bool ok = std::abs (getParam (c, "cutoff") - before) < 0.01f;
+            if (! ok) std::printf ("  state not rejected: %s\n", what);
+            EXPECT (ok);
+        };
+
+        const char junk[] = "\xff\xfe not a state";
+        expectUnchanged (junk, (int) sizeof (junk), "junk");
+        expectUnchanged (nullptr, 0, "empty");
+        expectUnchanged (junk, -5, "negative size");
+
+        std::string huge (2 * 1024 * 1024, 'x');
+        expectUnchanged (huge.data(), (int) huge.size(), "2 MB of data");
+
+        // XML nested ~100000 levels deep: a recursive parser would overflow the stack
+        std::string deep;
+        for (int i = 0; i < 100000; ++i) deep += "<a>";
+        expectUnchanged (deep.data(), (int) deep.size(), "deeply nested XML");
+
+        juce::MemoryBlock header;
+        if (auto xml = juce::XmlDocument::parse ("<STATE/>"))
+            juce::AudioProcessor::copyXmlToBinary (*xml, header);
+        {
+            std::string bomb;
+            for (int i = 0; i < 2000; ++i) bomb += "<n>";
+            juce::MemoryBlock bm;
+            bm.append (header.getData(), juce::jmin<size_t> (8, header.getSize()));
+            bm.append (bomb.data(), bomb.size());
+            expectUnchanged (bm.getData(), (int) bm.getSize(), "nested bomb behind a valid header");
+        }
+
+        // valid structure but hostile values: out of range, NaN, wrong types
+        SolomonProcessor c;
+        juce::MemoryBlock evil;
+        if (auto xml = juce::XmlDocument::parse (
+                "<STATE>"
+                "<PARAM id=\"cutoff\" value=\"1e30\"/><PARAM id=\"model\" value=\"-9999\"/>"
+                "<PARAM id=\"harmonics\" value=\"nan\"/><PARAM id=\"tune\" value=\"inf\"/>"
+                "<PARAM id=\"volume\" value=\"banana\"/><PARAM id=\"does_not_exist\" value=\"1\"/>"
+                "</STATE>"))
+            juce::AudioProcessor::copyXmlToBinary (*xml, evil);
+        c.setStateInformation (evil.getData(), (int) evil.getSize());
+        c.setRateAndBufferSizeDetails (48000.0, 256);
+        c.prepareToPlay (48000.0, 256);
+        juce::AudioBuffer<float> buf (2, 256);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        bool ok = true;
+        for (int i = 0; i < 100; ++i)
+        {
+            buf.clear(); c.processBlock (buf, midi); midi.clear();
+            ok = ok && finite (buf) && peak (buf) <= 1.0f;
+        }
+        EXPECT (ok);
+        EXPECT (getParam (c, "cutoff") >= 20.0f && getParam (c, "cutoff") <= 20000.0f);
+        EXPECT (getParam (c, "model") >= 0.0f && getParam (c, "model") <= 16.0f);
+    }
+
+    std::puts ("editor: creation, resizing and screenshot");
+    {
+        SolomonProcessor p;
+        p.setRateAndBufferSizeDetails (48000.0, 256);
+        p.prepareToPlay (48000.0, 256);
+        setParam (p, "model", 7.0f);
+        setParam (p, "mod_lfo_timbre", 0.6f);
+        setParam (p, "mod_pres_cutoff", -0.4f);
         std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
         EXPECT (ed != nullptr);
-        ed->setSize (720, 400);
+        ed->setSize (900, 620);
         auto img = ed->createComponentSnapshot (ed->getLocalBounds());
-        EXPECT (img.getWidth() == 720 && img.getHeight() == 400);
+        EXPECT (img.getWidth() == 900 && img.getHeight() == 620);
+        ed->setSize (450, 310);                       // smallest allowed size
+        ed->setSize (1800, 1240);                     // largest allowed size
+        ed->setSize (900, 620);
+
         if (argc > 1)
         {
+            auto shot = ed->createComponentSnapshot (ed->getLocalBounds());
             juce::File out (juce::String::fromUTF8 (argv[1]));
             out.deleteFile();
             juce::FileOutputStream os (out);
             juce::PNGImageFormat png;
-            EXPECT (os.openedOk() && png.writeImageToStream (img, os));
-            std::printf ("  screenshot: %s\n", argv[1]);
+            EXPECT (os.openedOk() && png.writeImageToStream (shot, os));
+            std::printf ("  screenshot: %s (%dx%d)\n", argv[1], shot.getWidth(), shot.getHeight());
         }
     }
 

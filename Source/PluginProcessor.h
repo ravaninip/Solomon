@@ -1,9 +1,9 @@
 #pragma once
 #include <juce_audio_processors/juce_audio_processors.h>
 
-#include "Engine/Engine.h"
+#include <vector>
 
-#include <atomic>
+#include "Engine/Synth.h"
 
 class SolomonProcessor : public juce::AudioProcessor
 {
@@ -22,7 +22,7 @@ public:
     bool acceptsMidi() const override { return true; }
     bool producesMidi() const override { return false; }
     bool isMidiEffect() const override { return false; }
-    double getTailLengthSeconds() const override { return 0.0; }
+    double getTailLengthSeconds() const override { return 6.0; }   // longest release time
     int getNumPrograms() override { return 1; }
     int getCurrentProgram() override { return 0; }
     void setCurrentProgram (int) override {}
@@ -31,15 +31,37 @@ public:
     void getStateInformation (juce::MemoryBlock&) override;
     void setStateInformation (const void*, int) override;
 
-    // message thread only
-    engine::State state;
-    std::atomic<int> stateRevision { 0 };
+    juce::AudioProcessorValueTreeState apvts;
 
-    // shared with the audio thread: atomics only, never locks or allocation in processBlock
-    std::atomic<float> gain { 0.8f };
+    // Parameter ids of the modulation matrix cells, e.g. "mod_lfo_timbre".
+    static juce::String modId (int source, int dest);
 
 private:
-    double sampleRate = 44100.0;
+    static juce::AudioProcessorValueTreeState::ParameterLayout createLayout();
+    solomon::Params readParams() const;
+    void handleMidi (const juce::MidiMessage&);
+    void renderSegment (int start, int length);
+
+    solomon::Synth synth;
+    std::vector<float> mono;
+
+    struct Cached
+    {
+        std::atomic<float>* model = nullptr;
+        std::atomic<float>* harmonics = nullptr; std::atomic<float>* timbre = nullptr;
+        std::atomic<float>* morph = nullptr;     std::atomic<float>* tune = nullptr;
+        std::atomic<float>* cutoff = nullptr;    std::atomic<float>* resonance = nullptr;
+        std::atomic<float>* filterMode = nullptr;
+        std::atomic<float>* ampA = nullptr; std::atomic<float>* ampD = nullptr;
+        std::atomic<float>* ampS = nullptr; std::atomic<float>* ampR = nullptr;
+        std::atomic<float>* fltA = nullptr; std::atomic<float>* fltD = nullptr;
+        std::atomic<float>* fltS = nullptr; std::atomic<float>* fltR = nullptr;
+        std::atomic<float>* lfoRate = nullptr; std::atomic<float>* lfoShape = nullptr;
+        std::atomic<float>* volume = nullptr;
+        std::atomic<float>* mod[solomon::kNumModSources][solomon::kNumModDests] = {};
+    } p;
+
+    juce::AudioBuffer<float>* currentBuffer = nullptr;
 
     JUCE_DECLARE_NON_COPYABLE_WITH_LEAK_DETECTOR (SolomonProcessor)
 };

@@ -260,6 +260,44 @@ static void testSynthVoices()
     CHECK (s.activeVoices() == 0);
 }
 
+static void testSynthPitch()
+{
+    // MIDI note 69 must sound at 440 Hz (and an octave up at 880 Hz) at every host rate, with the
+    // tune parameter and pitch bend shifting by the right number of semitones.
+    for (double rate : { 44100.0, 48000.0, 96000.0 })
+    {
+        auto dominant = [&] (int note, float tune, float bend)
+        {
+            Synth s;
+            s.prepare (rate);
+            Params p = basicPatch (5);
+            p.cutoff = 20000.0f; p.resonance = 0.0f; p.tune = tune;
+            p.mod[kModEnv][kDestCutoff] = 0.0f;
+            s.setParams (p);
+            s.setPitchBend (bend);
+            s.noteOn (note, 0.9f);
+            const auto out = renderSynth (s, (int) rate, 480);
+            // search the fundamental on a fine grid (0.25 Hz) between 100 Hz and 2 kHz
+            double best = 0, bestFreq = 0;
+            for (double f = 100.0; f < 2000.0; f += 0.25)
+            {
+                const double a = amplitudeAt (out, (size_t) rate / 4, f, rate);
+                if (a > best) { best = a; bestFreq = f; }
+            }
+            return bestFreq;
+        };
+        const double a4 = dominant (69, 0.0f, 0.0f);
+        const double a5 = dominant (81, 0.0f, 0.0f);
+        const double tuned = dominant (69, 12.0f, 0.0f);
+        const double bent = dominant (69, 0.0f, 2.0f);
+        if (std::abs (a4 - 440.0) > 0.4) std::printf ("  pitch at %.0f Hz: note 69 -> %.2f Hz\n", rate, a4);
+        CHECK (std::abs (a4 - 440.0) < 0.4);   // within ~1.5 cents (measurement grid is 0.25 Hz)
+        CHECK (std::abs (a5 - 880.0) < 0.8);
+        CHECK (std::abs (tuned - 880.0) < 0.8);
+        CHECK (std::abs (bent - 440.0 * std::pow (2.0, 2.0 / 12.0)) < 0.6);
+    }
+}
+
 static void testSynthBlockSizeIndependence()
 {
     // The result must not depend on how the host chops the audio into buffers.
@@ -409,6 +447,7 @@ int main()
     testFilter();
     testEnvelopeAndLfo();
     testSynthVoices();
+    testSynthPitch();
     testSynthBlockSizeIndependence();
     testSynthAllModels();
     testSynthExtremes();
