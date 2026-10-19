@@ -492,6 +492,38 @@ int main (int argc, char** argv)
         EXPECT (back.name == "Round trip" && back.entries.size() == 2 && back.entries["a.b"].bounds == src.entries["a.b"].bounds
                 && ! back.entries["c_d-e"].visible && back.entries["c_d-e"].bounds == src.entries["c_d-e"].bounds);
 
+        // a file exactly as the Theme Studio writes it
+        {
+            Layout studio;
+            EXPECT (ok (R"json({
+  "format": "plugin-layout",
+  "version": 1,
+  "plugin": "Solomon",
+  "name": "Test layout",
+  "baseWidth": 980,
+  "baseHeight": 720,
+  "elements": {
+    "knob.cutoff": {
+      "x": 422,
+      "y": 236,
+      "w": 222,
+      "h": 144
+    },
+    "knob.resonance": {
+      "x": 555,
+      "y": 225,
+      "w": 188,
+      "h": 117,
+      "visible": false
+    }
+  }
+}
+)json", studio));
+            EXPECT (studio.name == "Test layout" && studio.entries.size() == 2);
+            EXPECT (studio.entries["knob.cutoff"].bounds == juce::Rectangle<int> (422, 236, 222, 144) && studio.entries["knob.cutoff"].visible);
+            EXPECT (studio.entries["knob.resonance"].bounds == juce::Rectangle<int> (555, 225, 188, 117) && ! studio.entries["knob.resonance"].visible);
+        }
+
         // rectangles are forced inside the window, whatever the file says
         Layout c;
         EXPECT (ok (head + ", \"elements\": { \"a\": { \"x\": -50, \"y\": 99999, \"w\": 5, \"h\": 1000000 }, \"b\": { \"x\": 900, \"y\": 700, \"w\": 400, \"h\": 400 } } }", c));
