@@ -4,44 +4,48 @@ using namespace solomon;
 
 namespace
 {
-const juce::Colour kBackground { 0xff161a20 };
-const juce::Colour kPanel { 0xff1d232b };
-const juce::Colour kAccent { 0xff3ddc97 };
-const juce::Colour kText { 0xffe6ebf0 };
-const juce::Colour kDim { 0xff8b97a5 };
-const juce::Colour kWell { 0xff12161b };
-const juce::Colour kWarm { 0xffffa94d };
+const Theme& T() { return ui::theme(); }
 
+constexpr int kThemeFolderItem = 1000, kThemeReloadItem = 1001;
 constexpr int kBaseWidth = 980, kBaseHeight = 720;
 
 void styleHeader (juce::Label& l, const juce::String& text)
 {
     l.setText (text, juce::dontSendNotification);
     l.setFont (juce::FontOptions (12.5f, juce::Font::bold));
-    l.setColour (juce::Label::textColourId, kAccent);
+    l.setColour (juce::Label::textColourId, T().accent);
     l.setJustificationType (juce::Justification::centredLeft);
 }
 } // namespace
 
-SolomonEditor::Look::Look()
-{
-    setColour (juce::Slider::rotarySliderFillColourId, kAccent);
-    setColour (juce::Slider::rotarySliderOutlineColourId, juce::Colour (0xff2c343e));
-    setColour (juce::Slider::thumbColourId, kText);
-    setColour (juce::Slider::textBoxTextColourId, kText);
-    setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
-    setColour (juce::Label::textColourId, kDim);
-    setColour (juce::ComboBox::backgroundColourId, juce::Colour (0xff232a33));
-    setColour (juce::ComboBox::textColourId, kText);
-    setColour (juce::ComboBox::outlineColourId, juce::Colour (0xff343d49));
-    setColour (juce::ComboBox::arrowColourId, kAccent);
-    setColour (juce::PopupMenu::backgroundColourId, juce::Colour (0xff232a33));
-    setColour (juce::PopupMenu::textColourId, kText);
-    setColour (juce::PopupMenu::highlightedBackgroundColourId, kAccent.withAlpha (0.35f));
-    setColour (juce::TooltipWindow::backgroundColourId, juce::Colour (0xff232a33));
-    setColour (juce::TooltipWindow::textColourId, kText);
-}
+SolomonEditor::Look::Look() { apply(); }
 
+void SolomonEditor::Look::apply()
+{
+    const auto& t = T();
+    setColour (juce::Slider::rotarySliderFillColourId, t.accent);
+    setColour (juce::Slider::rotarySliderOutlineColourId, t.edge);
+    setColour (juce::Slider::thumbColourId, t.text);
+    setColour (juce::Slider::textBoxTextColourId, t.text);
+    setColour (juce::Slider::textBoxOutlineColourId, juce::Colours::transparentBlack);
+    setColour (juce::Label::textColourId, t.dim);
+    setColour (juce::ComboBox::backgroundColourId, t.control);
+    setColour (juce::ComboBox::textColourId, t.text);
+    setColour (juce::ComboBox::outlineColourId, t.controlEdge);
+    setColour (juce::ComboBox::arrowColourId, t.accent);
+    setColour (juce::PopupMenu::backgroundColourId, t.control);
+    setColour (juce::PopupMenu::textColourId, t.text);
+    setColour (juce::PopupMenu::highlightedBackgroundColourId, t.accent.withAlpha (0.35f));
+    setColour (juce::PopupMenu::highlightedTextColourId, t.text);
+    setColour (juce::TextButton::buttonColourId, t.control);
+    setColour (juce::TextButton::textColourOffId, t.text);
+    setColour (juce::TooltipWindow::backgroundColourId, t.control);
+    setColour (juce::TooltipWindow::textColourId, t.text);
+    setColour (juce::AlertWindow::backgroundColourId, t.panel);
+    setColour (juce::AlertWindow::textColourId, t.text);
+    setColour (juce::TextEditor::backgroundColourId, t.well);
+    setColour (juce::TextEditor::textColourId, t.text);
+}
 
 void SolomonEditor::Look::drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos,
                                             float minSliderPos, float maxSliderPos, juce::Slider::SliderStyle style,
@@ -55,15 +59,15 @@ void SolomonEditor::Look::drawLinearSlider (juce::Graphics& g, int x, int y, int
     const float cy = (float) y + (float) height * 0.5f;
     const float centre = (float) x + (float) width * 0.5f;       // matrix ranges are symmetric: 0 sits in the middle
     juce::Rectangle<float> track ((float) x, cy - 3.0f, (float) width, 6.0f);
-    g.setColour (kWell);
+    g.setColour (T().well);
     g.fillRoundedRectangle (track, 3.0f);
 
     const bool active = std::abs (sliderPos - centre) > 1.0f;
-    g.setColour (sliderPos >= centre ? kAccent : kWarm);
+    g.setColour (sliderPos >= centre ? T().accent : T().warm);
     g.fillRect (juce::Rectangle<float> (juce::jmin (centre, sliderPos), cy - 3.0f, std::abs (sliderPos - centre), 6.0f));
-    g.setColour (kDim);
+    g.setColour (T().dim);
     g.drawVerticalLine ((int) centre, cy - 6.0f, cy + 6.0f);
-    g.setColour (active ? kText : kDim);
+    g.setColour (active ? T().text : T().dim);
     g.fillEllipse (sliderPos - 5.0f, cy - 5.0f, 10.0f, 10.0f);
 }
 
@@ -147,7 +151,7 @@ SolomonEditor::SolomonEditor (SolomonProcessor& p)
 
     title.setText ("Solomon", juce::dontSendNotification);
     title.setFont (juce::FontOptions (26.0f, juce::Font::bold));
-    title.setColour (juce::Label::textColourId, kAccent);
+    title.setColour (juce::Label::textColourId, T().accent);
     addAndMakeVisible (title);
 
     model = &addChoice ("model", "Oscillator model", "Sound generator. Harmonics, Timbre and Morph change meaning with the model.");
@@ -215,10 +219,17 @@ SolomonEditor::SolomonEditor (SolomonProcessor& p)
     saveButton.setTooltip ("Save the current sound as a user preset");
     saveButton.onClick = [this] { askToSavePreset(); };
     presetNote.setFont (juce::FontOptions (11.0f));
-    presetNote.setColour (juce::Label::textColourId, kDim);
+    presetNote.setColour (juce::Label::textColourId, T().dim);
     for (auto* c : std::initializer_list<juce::Component*> { &presetBox, &prevButton, &nextButton, &saveButton, &presetNote })
         addAndMakeVisible (c);
     rebuildPresetMenu();
+
+    themeBox.setTooltip ("Colour theme. Add your own by saving a theme file (made with the Theme Studio) in the themes folder.");
+    themeBox.onChange = [this] { themeMenuChanged(); };
+    addAndMakeVisible (themeBox);
+    rebuildThemeMenu();
+    applyTheme();
+    ThemeManager::shared().addChangeListener (this);
 
     updateModelLabels();
 
@@ -232,15 +243,76 @@ SolomonEditor::SolomonEditor (SolomonProcessor& p)
 SolomonEditor::~SolomonEditor()
 {
     stopTimer();
+    ThemeManager::shared().removeChangeListener (this);
     setLookAndFeel (nullptr);
 }
 
 void SolomonEditor::paint (juce::Graphics& g)
 {
-    g.fillAll (kBackground);
-    g.setColour (kPanel);
+    g.fillAll (T().background);
+    g.setColour (T().panel);
     for (auto r : panels)
-        g.fillRoundedRectangle (r.toFloat(), 8.0f);
+        g.fillRoundedRectangle (r.toFloat(), T().panelRadius);
+}
+
+// ------------------------------------------------------------------------ themes
+void SolomonEditor::changeListenerCallback (juce::ChangeBroadcaster*)
+{
+    applyTheme();
+    rebuildThemeMenu();
+}
+
+void SolomonEditor::applyTheme()
+{
+    look.apply();
+    title.setColour (juce::Label::textColourId, T().accent);
+    presetNote.setColour (juce::Label::textColourId, T().dim);
+    for (auto* l : { &oscHeader, &filterHeader, &ampHeader, &fltEnvHeader, &lfoHeader, &matrixHeader })
+        l->setColour (juce::Label::textColourId, T().accent);
+    sendLookAndFeelChange();
+    repaint();
+}
+
+void SolomonEditor::rebuildThemeMenu()
+{
+    auto& themes = ThemeManager::shared();
+    themeBox.clear (juce::dontSendNotification);
+    themeBox.addSectionHeading ("Themes");
+    for (int i = 0; i < (int) themes.themes().size(); ++i)
+    {
+        if (i == themes.numBuiltIn())
+            themeBox.addSectionHeading ("Your themes");
+        themeBox.addItem (themes.themes()[(size_t) i].name, i + 1);
+    }
+    themeBox.addSeparator();
+    themeBox.addItem ("Open themes folder...", kThemeFolderItem);
+    themeBox.addItem ("Reload themes", kThemeReloadItem);
+    themeBox.setSelectedId (themes.indexOf (themes.current().name) + 1, juce::dontSendNotification);
+}
+
+void SolomonEditor::themeMenuChanged()
+{
+    auto& themes = ThemeManager::shared();
+    const int id = themeBox.getSelectedId();
+    if (id == kThemeFolderItem)
+    {
+        themes.folder().createDirectory();
+        themes.folder().revealToUser();
+    }
+    else if (id == kThemeReloadItem)
+    {
+        themes.refresh();
+        say (themes.problems().isEmpty() ? "Themes reloaded"
+                                         : "Ignored: " + themes.problems()[0]);
+        themes.sendSynchronousChangeMessage();       // also refreshes every other open editor
+        return;
+    }
+    else if (id > 0)
+    {
+        themes.select (themes.themes()[(size_t) (id - 1)].name);
+        return;
+    }
+    rebuildThemeMenu();                              // back to showing the current theme
 }
 
 // ------------------------------------------------------------------------ live updates
@@ -373,7 +445,9 @@ void SolomonEditor::resized()
 
     // top bar: title | presets | oscillator model | voices + level | volume
     auto top = area.removeFromTop (74);
-    title.setBounds (top.removeFromLeft (150));
+    auto titleArea = top.removeFromLeft (150);
+    title.setBounds (titleArea.removeFromTop (44));
+    themeBox.setBounds (titleArea.removeFromTop (24).withTrimmedRight (8));
 
     auto presetArea = top.removeFromLeft (330).withTrimmedTop (4);
     {

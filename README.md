@@ -74,6 +74,9 @@ docs/              additional documentation
 - **An interface that tells you what is going on:** the three macro knobs are named after what they do in the
   selected model; a live filter response curve (set cut-off and modulated cut-off); the shape of both
   envelopes; lamps for the four voices and an output level meter; live bars for every modulation source.
+- **Colour themes:** three built-in themes (Midnight, Paper, Amber) and your own, designed in the
+  [Theme Studio](https://github.com/ravaninip/ThemeEditorVST) and dropped into the themes folder
+  (see [docs/THEMES.md](docs/THEMES.md)).
 - **Resizable interface** with tooltips.
 
 ## Installation
@@ -146,6 +149,7 @@ ctest --test-dir build --output-on-failure
 ## Roadmap
 
 - Preset categories, tags and a search field
+- Theme Studio: drag-and-drop layout editing (the colour editor is available now)
 - Glide, unison and a cycling envelope
 - Arpeggiator and sequencer
 - Effects (delay, reverb)

@@ -7,7 +7,8 @@
 #include "Widgets.h"
 
 class SolomonEditor : public juce::AudioProcessorEditor,
-                      private juce::Timer
+                      private juce::Timer,
+                      private juce::ChangeListener
 {
 public:
     explicit SolomonEditor (SolomonProcessor&);
@@ -35,6 +36,7 @@ private:
     {
     public:
         Look();
+        void apply();                       // (re)reads the colours of the current theme
         // Bipolar horizontal sliders (the modulation matrix): the bar grows from the centre.
         void drawLinearSlider (juce::Graphics&, int x, int y, int width, int height, float sliderPos,
                                float minSliderPos, float maxSliderPos, juce::Slider::SliderStyle, juce::Slider&) override;
@@ -45,6 +47,10 @@ private:
     void layoutRow (juce::Rectangle<int> area, std::vector<Knob*> knobs);
 
     void timerCallback() override;
+    void changeListenerCallback (juce::ChangeBroadcaster*) override;        // the theme changed
+    void applyTheme();
+    void rebuildThemeMenu();
+    void themeMenuChanged();
     void updateModelLabels();
     void rebuildPresetMenu();
     void selectPreset (int entryIndex);
@@ -70,6 +76,7 @@ private:
     juce::ComboBox presetBox;
     juce::TextButton prevButton { "<" }, nextButton { ">" }, saveButton { "Save" };
     juce::Label presetNote;
+    juce::ComboBox themeBox;
     int shownModel = -1, shownPreset = -2, noteCountdown = 0;
 
     ui::FilterCurve filterCurve;
