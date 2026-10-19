@@ -50,6 +50,10 @@ ISO/IEC 29147 and the EU Cyber Resilience Act.
   nesting limit before parsing, at most 100 files, symbolic links ignored. A theme whose text would be unreadable
   on its own panels is refused, so a theme can never hide the controls needed to switch it. The chosen theme is
   remembered in a one-line text file next to the themes folder.
+- **Layout files.** Layouts (`*.json` in `Layouts`, next to the themes) are untrusted input as well: at most 32 KiB,
+  strict format and version, the plug-in name and window size must match, element ids restricted to a safe
+  alphabet, at most 256 elements and 100 files, every rectangle clamped into the window, symbolic links ignored.
+  The theme and layout menus cannot be hidden by a layout and are always on top.
 - **Supply chain.** Dependencies are pinned (`SOLOMON_JUCE_TAG`; the vendored oscillator code is pinned by commit
   in `tools/vendor_mutable.sh` and each file keeps its license header), GitHub Actions are pinned to commit SHAs
   and kept up to date by Dependabot, and the workflow token is read-only by default. Third-party components

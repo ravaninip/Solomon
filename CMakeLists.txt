@@ -102,7 +102,8 @@ if(SOLOMON_BUILD_PLUGIN)
         Source/PluginProcessor.cpp
         Source/PluginEditor.cpp
         Source/Presets.cpp
-        Source/Theme.cpp)
+        Source/Theme.cpp
+        Source/Layout.cpp)
 
     # no network, no browser, no JUCE splash/telemetry
     target_compile_definitions(Solomon PUBLIC
@@ -134,7 +135,8 @@ if(SOLOMON_BUILD_PLUGIN)
             Source/PluginProcessor.cpp
             Source/PluginEditor.cpp
             Source/Presets.cpp
-        Source/Theme.cpp)
+        Source/Theme.cpp
+        Source/Layout.cpp)
         target_include_directories(solomon_plugin_smoke PRIVATE Source)
         target_compile_definitions(solomon_plugin_smoke PRIVATE
             JUCE_WEB_BROWSER=0 JUCE_USE_CURL=0 JUCE_STANDALONE_APPLICATION=1)

@@ -1,8 +1,10 @@
 // Host-less smoke test: drives the processor (audio, MIDI, parameters, state) and the editor without a
 // DAW, and can save a screenshot of the user interface.
 // Usage: solomon_plugin_smoke [screenshot.png [theme name]]
+//        solomon_plugin_smoke --descriptor descriptor.json     (writes the list of layout elements)
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
+#include "Layout.h"
 #include "Presets.h"
 #include "StateGuard.h"
 #include "Theme.h"
@@ -469,6 +471,89 @@ int main (int argc, char** argv)
         settings.deleteFile();
     }
 
+    std::puts ("layouts: format, validation, hostile files, manager");
+    {
+        const juce::String head = "{ \"format\": \"plugin-layout\", \"version\": 1, \"plugin\": \"Solomon\", \"name\": \"L\", \"baseWidth\": 980, \"baseHeight\": 720";
+        auto ok = [&] (const juce::String& json, Layout& l) { juce::String e; return Layout::parse (json, "Solomon", 980, 720, l, e); };
+        auto fails = [&] (const juce::String& json) { Layout l; juce::String e; return ! Layout::parse (json, "Solomon", 980, 720, l, e) && e.isNotEmpty(); };
+
+        Layout l;
+        EXPECT (ok (head + ", \"elements\": { \"knob.cutoff\": { \"x\": 10, \"y\": 20, \"w\": 100, \"h\": 120 }, \"matrix.cell.0.0\": { \"x\": 1, \"y\": 2, \"w\": 30, \"h\": 30, \"visible\": false } } }", l));
+        EXPECT (l.entries.size() == 2 && l.entries["knob.cutoff"].bounds == juce::Rectangle<int> (10, 20, 100, 120));
+        EXPECT (l.entries["knob.cutoff"].visible && ! l.entries["matrix.cell.0.0"].visible);
+        EXPECT (ok (head + ", \"elements\": {} }", l) && l.entries.empty());                         // an empty layout is fine
+
+        Layout back;                                                                                   // round trip
+        Layout src;
+        src.name = "Round trip";
+        src.entries["a.b"] = { { 5, 6, 70, 80 }, true };
+        src.entries["c_d-e"] = { { 100, 200, 30, 40 }, false };
+        EXPECT (ok (src.toJson ("Solomon", 980, 720), back));
+        EXPECT (back.name == "Round trip" && back.entries.size() == 2 && back.entries["a.b"].bounds == src.entries["a.b"].bounds
+                && ! back.entries["c_d-e"].visible && back.entries["c_d-e"].bounds == src.entries["c_d-e"].bounds);
+
+        // rectangles are forced inside the window, whatever the file says
+        Layout c;
+        EXPECT (ok (head + ", \"elements\": { \"a\": { \"x\": -50, \"y\": 99999, \"w\": 5, \"h\": 1000000 }, \"b\": { \"x\": 900, \"y\": 700, \"w\": 400, \"h\": 400 } } }", c));
+        for (const auto& [id, e] : c.entries)
+        {
+            EXPECT (e.bounds.getX() >= 0 && e.bounds.getY() >= 0 && e.bounds.getRight() <= 980 && e.bounds.getBottom() <= 720);
+            EXPECT (e.bounds.getWidth() >= Layout::kMinSize && e.bounds.getHeight() >= Layout::kMinSize);
+        }
+        EXPECT (ok (head + ", \"elements\": { \"a\": { \"x\": 1.4, \"y\": 2.6, \"w\": 50.2, \"h\": 40 } } }", c) && c.entries["a"].bounds.getY() == 3);
+
+        // refused, with a reason
+        EXPECT (fails (""));
+        EXPECT (fails ("nope"));
+        EXPECT (fails ("[1]"));
+        EXPECT (fails (head + " }"));                                                                  // no elements
+        EXPECT (fails (head + ", \"elements\": [] }"));
+        EXPECT (fails (juce::String (head).replace ("plugin-layout", "other") + ", \"elements\": {} }"));
+        EXPECT (fails (juce::String (head).replace ("\"version\": 1", "\"version\": 2") + ", \"elements\": {} }"));
+        EXPECT (fails (juce::String (head).replace ("Solomon", "ChordMate") + ", \"elements\": {} }"));      // another plug-in's layout
+        EXPECT (fails (juce::String (head).replace ("\"baseWidth\": 980", "\"baseWidth\": 800") + ", \"elements\": {} }")); // another window size
+        EXPECT (fails (juce::String (head).replace ("\"name\": \"L\"", "\"name\": \"\"") + ", \"elements\": {} }"));
+        EXPECT (fails (head + ", \"elements\": { \"a\": { \"x\": 1, \"y\": 2, \"w\": 3 } } }"));               // h missing
+        EXPECT (fails (head + ", \"elements\": { \"a\": { \"x\": \"1\", \"y\": 2, \"w\": 30, \"h\": 30 } } }"));
+        EXPECT (fails (head + ", \"elements\": { \"a\": 5 } }"));
+        EXPECT (fails (head + ", \"elements\": { \"a\": { \"x\": 1, \"y\": 2, \"w\": 30, \"h\": 30, \"visible\": \"no\" } } }"));
+        for (auto badId : { "a b", "a/b", "../x", "a\\\\b", "\\u00e9" })
+            EXPECT (fails (head + ", \"elements\": { \"" + badId + "\": { \"x\": 1, \"y\": 2, \"w\": 30, \"h\": 30 } } }"));
+        EXPECT (! Layout::isValidId (juce::String::repeatedString ("a", Layout::kMaxIdLength + 1)) && Layout::isValidId ("matrix.cell.3.3"));
+
+        juce::String many = head + ", \"elements\": { ";
+        for (int i = 0; i <= Layout::kMaxEntries; ++i)
+            many += juce::String (i ? ", " : "") + "\"e" + juce::String (i) + "\": { \"x\": 1, \"y\": 2, \"w\": 30, \"h\": 30 }";
+        EXPECT (fails (many + " } }"));
+        juce::String deep;
+        for (int i = 0; i < 5000; ++i) deep += "{\"a\":";
+        EXPECT (fails (deep));
+        EXPECT (fails (head + ", \"pad\": \"" + juce::String::repeatedString ("a", Layout::kMaxBytes) + "\", \"elements\": {} }"));
+
+        // the manager
+        auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                       .getChildFile ("solomon_test_layouts_" + juce::String (juce::Random::getSystemRandom().nextInt64()));
+        dir.createDirectory();
+        auto settings = dir.getSiblingFile (dir.getFileName() + ".txt");
+        src.name = "Wide";
+        dir.getChildFile ("wide.json").replaceWithText (src.toJson ("Solomon", 980, 720));
+        dir.getChildFile ("other.json").replaceWithText (src.toJson ("ChordMate", 980, 720));
+        dir.getChildFile ("size.json").replaceWithText (src.toJson ("Solomon", 800, 600));
+        dir.getChildFile ("broken.json").replaceWithText ("{");
+        dir.getChildFile ("huge.json").replaceWithText (juce::String::repeatedString ("x", 40000));
+        dir.getChildFile ("clash.json").replaceWithText (Layout().toJson ("Solomon", 980, 720));           // called "Default"
+        {
+            LayoutManager lm ("Solomon", 980, 720, dir, settings);
+            EXPECT (lm.layouts().size() == 2 && lm.current().name == "Default" && lm.current().entries.empty());
+            EXPECT (lm.problems().size() == 5);
+            EXPECT (! lm.select ("nothing") && lm.select ("wide") && lm.current().entries.size() == 2);
+        }
+        { LayoutManager again ("Solomon", 980, 720, dir, settings); EXPECT (again.current().name == "Wide");           // remembered
+          dir.getChildFile ("wide.json").deleteFile(); again.refresh(); EXPECT (again.current().name == "Default"); }  // file gone: fall back
+        dir.deleteRecursively();
+        settings.deleteFile();
+    }
+
     std::puts ("editor: creation, resizing and screenshot");
     {
         SolomonProcessor p;
@@ -477,6 +562,7 @@ int main (int argc, char** argv)
         setParam (p, "model", 7.0f);
         setParam (p, "mod_lfo_timbre", 0.6f);
         setParam (p, "mod_pres_cutoff", -0.4f);
+        const bool descriptorMode = argc > 2 && std::string (argv[1]) == "--descriptor";
         auto& themes = ThemeManager::shared();
         const auto originalTheme = themes.current().name;             // the user's own choice is put back at the end
         std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
@@ -497,12 +583,97 @@ int main (int argc, char** argv)
         }
         EXPECT (differing >= 1);
         themes.select (originalTheme);
-        if (argc > 2) EXPECT (themes.select (juce::String::fromUTF8 (argv[2])));
+        if (! descriptorMode && argc > 2) EXPECT (themes.select (juce::String::fromUTF8 (argv[2])));
+
+        // the list of layout elements: what the Theme Studio reads
+        {
+            juce::var d;
+            const auto text = static_cast<SolomonEditor*> (ed.get())->describeLayout();
+            EXPECT (juce::JSON::parse (text, d).wasOk() && d.getDynamicObject() != nullptr);
+            auto* list = d.getProperty ("elements", {}).getArray();
+            EXPECT (list != nullptr && list->size() > 50);
+            juce::StringArray ids;
+            int panelsSeen = 0, locked = 0;
+            for (const auto& item : *list)
+            {
+                const auto id = item.getProperty ("id", {}).toString();
+                EXPECT (Layout::isValidId (id) && ! ids.contains (id));
+                ids.add (id);
+                const int x = item["x"], y = item["y"], w = item["w"], h = item["h"];
+                EXPECT (w >= Layout::kMinSize && h >= 4 && x >= 0 && y >= 0 && x + w <= 980 && y + h <= 720);
+                const auto type = item.getProperty ("type", {}).toString();
+                EXPECT (type == "panel" || type == "knob" || type == "slider" || type == "menu" || type == "label"
+                        || type == "graph" || type == "meter" || type == "group");
+                panelsSeen += type == "panel";
+                locked += (bool) item.getProperty ("locked", false);
+                const auto param = item.getProperty ("param", {}).toString();
+                EXPECT (param.isEmpty() || p.apvts.getParameter (param) != nullptr);          // every parameter id is real
+                const auto parent = item.getProperty ("parent", {}).toString();
+                EXPECT (parent.isEmpty() || parent.startsWith ("panel."));
+            }
+            EXPECT (panelsSeen == 6 && locked == 2);
+            for (auto id : { "knob.cutoff", "matrix.cell.3.3", "theme", "layout", "graph.filter", "panel.matrix" })
+                EXPECT (ids.contains (id));
+            // every parameter that has a knob or a menu appears exactly once
+            for (auto* prm : p.getParameters())
+                if (auto* withId = dynamic_cast<juce::AudioProcessorParameterWithID*> (prm))
+                {
+                    int n = 0;
+                    for (const auto& item : *list) n += item.getProperty ("param", {}).toString() == withId->paramID;
+                    EXPECT (n == 1);
+                }
+            if (descriptorMode)
+            {
+                juce::File out (juce::String::fromUTF8 (argv[2]));
+                out.deleteFile();
+                EXPECT (out.replaceWithText (text));
+                std::printf ("  descriptor: %s (%d elements)\n", argv[2], list->size());
+            }
+        }
+
+        // applying a layout: elements move, hidden ones disappear, the locked ones cannot be hidden,
+        // unknown ids are ignored, and a layout survives resizing the window
+        {
+            auto& lm = SolomonEditor::layouts();
+            const auto originalLayout = lm.current().name;
+            auto folder = lm.folder();
+            folder.createDirectory();
+            auto file = folder.getChildFile ("zz_smoke_test_layout.json");
+            Layout test;
+            test.name = "zz smoke test";
+            test.entries["knob.cutoff"] = { { 20, 30, 100, 110 }, true };
+            test.entries["matrix.cell.0.0"] = { { 400, 600, 100, 20 }, false };
+            test.entries["theme"] = { { 300, 300, 90, 24 }, false };                                  // locked: cannot be hidden
+            test.entries["panel.osc"] = { { 500, 100, 200, 200 }, true };
+            test.entries["not.an.element"] = { { 1, 1, 50, 50 }, true };
+            EXPECT (file.replaceWithText (test.toJson ("Solomon", 980, 720)));
+            lm.refresh();
+            EXPECT (lm.select ("zz smoke test"));
+
+            auto* editor = static_cast<SolomonEditor*> (ed.get());
+            juce::Rectangle<int> b; bool shown = false;
+            EXPECT (editor->elementInfo ("knob.cutoff", b, shown) && shown && b == juce::Rectangle<int> (20, 30, 100, 110));
+            EXPECT (editor->elementInfo ("matrix.cell.0.0", b, shown) && ! shown);
+            EXPECT (editor->elementInfo ("matrix.cell.0.1", b, shown) && shown);                       // untouched elements stay
+            EXPECT (editor->elementInfo ("theme", b, shown) && shown && b == juce::Rectangle<int> (300, 300, 90, 24));
+            EXPECT (editor->elementInfo ("panel.osc", b, shown) && shown && b == juce::Rectangle<int> (500, 100, 200, 200));
+            EXPECT (! editor->elementInfo ("not.an.element", b, shown));
+            ed->setSize (1960, 1440);                                                                  // scaled with the window
+            EXPECT (editor->elementInfo ("knob.cutoff", b, shown) && b == juce::Rectangle<int> (40, 60, 200, 220));
+            ed->setSize (980, 720);
+
+            EXPECT (lm.select ("Default"));                                                            // back to the built-in design
+            EXPECT (editor->elementInfo ("matrix.cell.0.0", b, shown) && shown);
+            EXPECT (editor->elementInfo ("knob.cutoff", b, shown) && b != juce::Rectangle<int> (20, 30, 100, 110));
+            file.deleteFile();
+            lm.refresh();
+            lm.select (originalLayout);
+        }
         ed->setSize (490, 360);                       // smallest allowed size
         ed->setSize (1960, 1440);                     // largest allowed size
         ed->setSize (980, 720);
 
-        if (argc > 1)
+        if (argc > 1 && ! descriptorMode)
         {
             auto shot = ed->createComponentSnapshot (ed->getLocalBounds());
             juce::File out (juce::String::fromUTF8 (argv[1]));
