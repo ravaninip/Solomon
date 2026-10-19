@@ -31,7 +31,9 @@ set_target_properties(solomon_mutable PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
     # M_PI and friends are only declared by <cmath> on MSVC when _USE_MATH_DEFINES is set
     target_compile_definitions(solomon_mutable PRIVATE _USE_MATH_DEFINES)
-    target_compile_options(solomon_mutable PRIVATE /W0 /utf-8)
+    # GCC attributes in the upstream headers are removed by a force-included compatibility header
+    target_compile_options(solomon_mutable PRIVATE /W0 /utf-8
+        "/FI${CMAKE_CURRENT_SOURCE_DIR}/Source/Engine/MutableCompat.h")
 else()
     target_compile_options(solomon_mutable PRIVATE -w)
 endif()
@@ -47,6 +49,8 @@ set_source_files_properties(Source/Engine/PlaitsOscillator.cc PROPERTIES COMPILE
 set_target_properties(solomon_engine PROPERTIES POSITION_INDEPENDENT_CODE ON)
 if(MSVC)
     target_compile_options(solomon_engine PRIVATE /utf-8)
+    set_source_files_properties(Source/Engine/PlaitsOscillator.cc PROPERTIES
+        COMPILE_OPTIONS "/FI${CMAKE_CURRENT_SOURCE_DIR}/Source/Engine/MutableCompat.h")
 endif()
 
 if(SOLOMON_BUILD_TESTS)
