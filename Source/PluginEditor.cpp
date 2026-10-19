@@ -8,6 +8,7 @@ const Theme& T() { return ui::theme(); }
 
 constexpr int kThemeFolderItem = 1000, kThemeReloadItem = 1001;
 constexpr int kBaseWidth = 980, kBaseHeight = 720;
+constexpr int kMaxDial = 66;                     // largest knob, in base-window pixels (the dial itself is a little smaller)
 
 void styleHeader (juce::Label& l, const juce::String& text)
 {
@@ -468,11 +469,11 @@ void SolomonEditor::addKnobElement (const juce::String& id, const juce::String& 
     const bool hasLabel = ! k.slider.isHorizontal();          // rotary knobs have a name above them
     Element e;
     e.id = id; e.type = k.slider.isHorizontal() ? "slider" : "knob"; e.label = label; e.param = k.paramId; e.parent = parent;
-    e.current = [&k, hasLabel] { return hasLabel ? k.label.getBounds().getUnion (k.slider.getBounds().expanded (2)) : k.slider.getBounds(); };
-    e.place = [&k, hasLabel] (juce::Rectangle<int> r)
+    e.current = [&k, hasLabel] { return hasLabel ? k.label.getBounds().getUnion (k.slider.getBounds()) : k.slider.getBounds(); };
+    e.place = [this, &k, hasLabel] (juce::Rectangle<int> r)
     {
-        if (hasLabel) { k.label.setBounds (r.removeFromTop (16)); k.slider.setBounds (r.reduced (2)); }
-        else          { k.slider.setBounds (r); }
+        if (hasLabel) placeKnob (k, r);
+        else          k.slider.setBounds (r);
     };
     e.show = [&k] (bool b) { k.slider.setVisible (b); k.label.setVisible (b); };
     e.shown = [&k] { return k.slider.isVisible(); };
@@ -696,10 +697,19 @@ void SolomonEditor::layoutRow (juce::Rectangle<int> area, std::vector<Knob*> row
     const int w = area.getWidth() / (int) row.size();
     for (auto* k : row)
     {
-        auto cell = area.removeFromLeft (w);
-        k->label.setBounds (cell.removeFromTop (16));
-        k->slider.setBounds (cell.reduced (2));
+        placeKnob (*k, area.removeFromLeft (w));
     }
+}
+
+void SolomonEditor::placeKnob (Knob& k, juce::Rectangle<int> area)
+{
+    constexpr int nameHeight = 16, valueHeight = 18, valueWidth = 70;
+    const int maxDial = juce::roundToInt (kMaxDial * (double) getWidth() / kBaseWidth);
+    const int dial = juce::jlimit (8, juce::jmax (8, maxDial), juce::jmin (area.getHeight() - nameHeight - valueHeight, area.getWidth() - 4));
+    const int width = juce::jmin (area.getWidth(), juce::jmax (dial + 4, valueWidth));
+    auto block = juce::Rectangle<int> (width, nameHeight + dial + valueHeight).withCentre (area.getCentre());
+    k.label.setBounds (block.removeFromTop (nameHeight));
+    k.slider.setBounds (block);
 }
 
 void SolomonEditor::resized()
@@ -720,8 +730,7 @@ void SolomonEditor::resized()
     top.removeFromLeft (12);
 
     auto vol = top.removeFromRight (90);
-    volume->label.setBounds (vol.removeFromTop (14));
-    volume->slider.setBounds (vol);
+    placeKnob (*volume, vol);
     auto meter = top.removeFromRight (110).withTrimmedTop (22).withTrimmedBottom (14).withTrimmedLeft (8);
     voiceMeter.setBounds (meter);
     auto modelBox = top.removeFromLeft (230).withTrimmedTop (6);

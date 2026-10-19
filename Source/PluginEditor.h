@@ -57,6 +57,9 @@ private:
     Choice& addChoice (const juce::String& paramId, const juce::String& text, const juce::String& tip);
     void layoutRow (juce::Rectangle<int> area, std::vector<Knob*> knobs);
     void placePresetBar (juce::Rectangle<int> area);
+    // Puts a knob (name, dial, value) in the middle of `area`. The dial has the same size everywhere, as large as
+    // the area allows up to a maximum, so every knob of the interface looks alike.
+    void placeKnob (Knob& k, juce::Rectangle<int> area);
 
     // Everything the user can move, resize or hide: how to read its default place, put it somewhere else
     // and show or hide it. Ids are part of the layout file format and must not change.

@@ -66,5 +66,9 @@ solomon_plugin_smoke --descriptor solomon.descriptor.json
 | `graph.filter`, `graph.ampEnv`, `graph.fltEnv` | graphs                                     |
 | `matrix.src.<n>`, `matrix.bar.<n>`, `matrix.dst.<n>`, `matrix.cell.<source>.<destination>` | modulation matrix |
 
+The rectangle of a knob holds its name, dial and value. The dial has the same size in every knob (as large as the
+rectangle allows, up to a maximum that scales with the window) and sits in the middle of the rectangle, so a layout
+cannot make one knob look different from the others by accident.
+
 A panel is only a background: moving it does not move what is inside (the Theme Studio can move a panel together
 with its contents).
