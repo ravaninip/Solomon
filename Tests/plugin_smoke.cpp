@@ -1,10 +1,11 @@
 // Host-less smoke test: drives the processor (audio, MIDI, parameters, state) and the editor without a
 // DAW, and can save a screenshot of the user interface.
-// Usage: solomon_plugin_smoke [screenshot.png]
+// Usage: solomon_plugin_smoke [screenshot.png [theme name]]
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
 #include "Presets.h"
 #include "StateGuard.h"
+#include "Theme.h"
 
 #include <cmath>
 #include <cstdio>
@@ -327,6 +328,147 @@ int main (int argc, char** argv)
         dir.deleteRecursively();
     }
 
+    std::puts ("themes: format, validation, hostile files, manager");
+    {
+        for (const auto& t : Theme::builtIn())
+            EXPECT (t.readabilityProblem().isEmpty() && t.name.isNotEmpty());
+        EXPECT (Theme::builtIn().size() >= 3 && Theme::builtIn()[0].name == "Midnight");
+
+        auto parseOk = [] (const juce::String& json, Theme& t) { juce::String e; return Theme::parse (json, t, e); };
+        auto parseFails = [] (const juce::String& json) { Theme t; juce::String e; return ! Theme::parse (json, t, e) && e.isNotEmpty(); };
+        const juce::String head = "{ \"format\": \"plugin-theme\", \"version\": 1, \"name\": \"X\"";
+
+        // every built-in theme survives a write/read round trip
+        for (const auto& t : Theme::builtIn())
+        {
+            Theme back;
+            EXPECT (parseOk (t.toJson(), back));
+            EXPECT (back.name == t.name && back.background == t.background && back.accent == t.accent
+                    && back.warm == t.warm && back.text == t.text && back.danger == t.danger
+                    && back.controlEdge == t.controlEdge && back.panelRadius == t.panelRadius);
+        }
+
+        // a file exactly as the Theme Studio writes it
+        {
+            Theme studio;
+            EXPECT (parseOk (R"json({
+  "format": "plugin-theme",
+  "version": 1,
+  "name": "Test Theme",
+  "colors": {
+    "background": "#f0f2f4",
+    "panel": "#ffffff",
+    "well": "#e2e5e9",
+    "accent": "#0845a0",
+    "warm": "#ae1a09",
+    "text": "#1a1e23",
+    "dim": "#595f69",
+    "edge": "#ccd0d7",
+    "control": "#f6f7f8",
+    "controlEdge": "#bcc1c8",
+    "danger": "#c62828"
+  },
+  "metrics": {
+    "panelRadius": 8
+  }
+}
+)json", studio));
+            EXPECT (studio.name == "Test Theme" && studio.accent == juce::Colour (0xff0845a0) && studio.panelRadius == 8.0f);
+        }
+
+        // a theme may set only some colours; the rest keep their defaults
+        Theme partial;
+        EXPECT (parseOk (head + ", \"colors\": { \"accent\": \"#FF00AA\" } }", partial));
+        EXPECT (partial.accent == juce::Colour (0xffff00aa) && partial.background == Theme().background);
+        EXPECT (parseOk (head + " }", partial));                              // colours and metrics are optional
+
+        // radius is clamped, not trusted
+        Theme r;
+        EXPECT (parseOk (head + ", \"metrics\": { \"panelRadius\": 1000 } }", r) && r.panelRadius == Theme::kMaxRadius);
+        EXPECT (parseOk (head + ", \"metrics\": { \"panelRadius\": -5 } }", r) && r.panelRadius == 0.0f);
+        EXPECT (parseFails (head + ", \"metrics\": { \"panelRadius\": \"big\" } }"));
+        EXPECT (parseFails (head + ", \"metrics\": 3 }"));
+
+        // malformed or hostile input is refused with a reason
+        EXPECT (parseFails (""));
+        EXPECT (parseFails ("not json"));
+        EXPECT (parseFails ("[1,2,3]"));
+        EXPECT (parseFails ("{ \"version\": 1, \"name\": \"X\" }"));                                     // no format
+        EXPECT (parseFails ("{ \"format\": \"other\", \"version\": 1, \"name\": \"X\" }"));
+        EXPECT (parseFails ("{ \"format\": \"plugin-theme\", \"version\": 2, \"name\": \"X\" }"));       // newer than we know
+        EXPECT (parseFails ("{ \"format\": \"plugin-theme\", \"version\": \"1\", \"name\": \"X\" }"));
+        EXPECT (parseFails ("{ \"format\": \"plugin-theme\", \"version\": 1 }"));                        // no name
+        EXPECT (parseFails ("{ \"format\": \"plugin-theme\", \"version\": 1, \"name\": \"  \" }"));
+        for (auto bad : { "red", "#12345", "#1234567", "#gggggg", "123456", "#ff00aa00", "" })
+            EXPECT (parseFails (head + ", \"colors\": { \"accent\": \"" + bad + "\" } }"));
+        EXPECT (parseFails (head + ", \"colors\": { \"accent\": 16711935 } }"));
+        EXPECT (parseFails (head + ", \"colors\": [] }"));
+        EXPECT (parseFails (head + ", \"colors\": { \"text\": \"#161a20\" } }"));                        // text invisible on the panels
+        EXPECT (parseFails (head + ", \"colors\": { \"accent\": \"#1d232b\" } }"));
+        EXPECT (parseFails (head + ", \"colors\": { \"dim\": \"#1d232b\" } }"));
+        EXPECT (parseFails (head + ", \"colors\": { \"control\": \"#e6ebf0\" } }"));                     // text invisible in menus
+
+        juce::String deep;
+        for (int i = 0; i < 5000; ++i) deep += "[";
+        EXPECT (parseFails (deep));                                                                       // would overflow a recursive parser
+        EXPECT (parseFails (head + ", \"pad\": \"" + juce::String::repeatedString ("a", Theme::kMaxBytes) + "\" }"));
+        EXPECT (Theme::cleanName (juce::String ("  a\n\tb\x01") + juce::String::repeatedString ("z", 200)).length() <= Theme::kMaxNameLength);
+        EXPECT (! Theme::cleanName (juce::String ("a\nb")).containsChar ('\n'));
+        EXPECT (Theme::contrastRatio (juce::Colours::black, juce::Colours::white) > 20.9);
+        EXPECT (Theme::contrastRatio (juce::Colours::red, juce::Colours::red) == 1.0);
+
+        // the manager: built-ins, user files, hostile files, persistence
+        auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                       .getChildFile ("solomon_test_themes_" + juce::String (juce::Random::getSystemRandom().nextInt64()));
+        dir.createDirectory();
+        auto settings = dir.getSiblingFile (dir.getFileName() + ".txt");
+        auto good = Theme::builtIn()[1];
+        good.name = "Custom One";
+        good.accent = juce::Colour (0xffff00aa);
+        dir.getChildFile ("custom.json").replaceWithText (good.toJson());
+        dir.getChildFile ("broken.json").replaceWithText ("{ nope");
+        dir.getChildFile ("empty.json").create();
+        dir.getChildFile ("huge.json").replaceWithText (juce::String::repeatedString ("x", 20000));
+        dir.getChildFile ("ignored.txt").replaceWithText (good.toJson());
+        auto clash = Theme::builtIn()[0];
+        dir.getChildFile ("clash.json").replaceWithText (clash.toJson());                                   // same name as a built-in
+        for (int i = 0; i < 3; ++i)
+            dir.getChildFile ("unreadable" + juce::String (i) + ".json").replaceWithText (
+                "{ \"format\": \"plugin-theme\", \"version\": 1, \"name\": \"U" + juce::String (i) + "\", \"colors\": { \"text\": \"#161a20\" } }");
+
+        {
+            ThemeManager tm (dir, settings);
+            const int builtIns = (int) Theme::builtIn().size();
+            EXPECT (tm.numBuiltIn() == builtIns && (int) tm.themes().size() == builtIns + 1);
+            EXPECT (tm.indexOf ("custom one") == builtIns);                                                // case-insensitive lookup
+            EXPECT (tm.problems().size() == 7);                                                            // broken, empty, huge, clash, 3 unreadable
+            EXPECT (tm.current().name == "Midnight");
+            EXPECT (! tm.select ("No such theme") && tm.current().name == "Midnight");
+            EXPECT (tm.select ("Custom One") && tm.current().accent == good.accent);
+            EXPECT (settings.existsAsFile());
+        }
+        {
+            ThemeManager again (dir, settings);                                                            // preference survives a restart
+            EXPECT (again.current().name == "Custom One");
+            dir.getChildFile ("custom.json").deleteFile();                                                 // theme file removed meanwhile
+            again.refresh();
+            EXPECT (again.current().name == "Midnight");
+        }
+        settings.replaceWithText (juce::String::repeatedString ("y", 5000));                               // junk preference file
+        { ThemeManager junk (dir, settings); EXPECT (junk.current().name == "Midnight"); }
+        { ThemeManager nowhere (dir.getChildFile ("missing"), dir.getChildFile ("missing/x.txt")); EXPECT ((int) nowhere.themes().size() == (int) Theme::builtIn().size()); }
+
+        for (int i = 0; i < ThemeManager::kMaxUserThemes + 20; ++i)                                         // too many files are capped
+        {
+            auto t = good;
+            t.name = "Many " + juce::String (i);
+            dir.getChildFile ("many" + juce::String (i) + ".json").replaceWithText (t.toJson());
+        }
+        { ThemeManager many (dir, settings); EXPECT ((int) many.themes().size() - many.numBuiltIn() == ThemeManager::kMaxUserThemes); }
+        dir.deleteRecursively();
+        settings.deleteFile();
+    }
+
     std::puts ("editor: creation, resizing and screenshot");
     {
         SolomonProcessor p;
@@ -335,11 +477,27 @@ int main (int argc, char** argv)
         setParam (p, "model", 7.0f);
         setParam (p, "mod_lfo_timbre", 0.6f);
         setParam (p, "mod_pres_cutoff", -0.4f);
+        auto& themes = ThemeManager::shared();
+        const auto originalTheme = themes.current().name;             // the user's own choice is put back at the end
         std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
         EXPECT (ed != nullptr);
         ed->setSize (980, 720);
         auto img = ed->createComponentSnapshot (ed->getLocalBounds());
         EXPECT (img.getWidth() == 980 && img.getHeight() == 720);
+
+        // every theme can be applied to a live editor, and it really changes what is drawn
+        juce::Colour firstPixel = img.getPixelAt (4, 4);
+        int differing = 0;
+        for (const auto& t : Theme::builtIn())
+        {
+            EXPECT (themes.select (t.name));
+            auto shot = ed->createComponentSnapshot (ed->getLocalBounds());
+            EXPECT (shot.getPixelAt (4, 4) == t.background);
+            if (shot.getPixelAt (4, 4) != firstPixel) ++differing;
+        }
+        EXPECT (differing >= 1);
+        themes.select (originalTheme);
+        if (argc > 2) EXPECT (themes.select (juce::String::fromUTF8 (argv[2])));
         ed->setSize (490, 360);                       // smallest allowed size
         ed->setSize (1960, 1440);                     // largest allowed size
         ed->setSize (980, 720);
@@ -354,6 +512,7 @@ int main (int argc, char** argv)
             EXPECT (os.openedOk() && png.writeImageToStream (shot, os));
             std::printf ("  screenshot: %s (%dx%d)\n", argv[1], shot.getWidth(), shot.getHeight());
         }
+        themes.select (originalTheme);
     }
 
     std::printf ("\n%d checks, %d failed\n", g_checks, g_fail);

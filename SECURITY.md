@@ -45,6 +45,11 @@ ISO/IEC 29147 and the EU Cyber Resilience Act.
   `~/.config/Solomon/Presets`): they are written only there, with file names cleaned so a name can never point
   outside the folder, and every preset file is read through the same size, structure and range checks as a host
   session. It never executes files.
+- **Theme files.** Colour themes (`*.json`) are read from `Themes` next to the presets folder. They are treated as
+  untrusted input like presets: at most 8 KiB, a strict format with a version number, every colour validated, a
+  nesting limit before parsing, at most 100 files, symbolic links ignored. A theme whose text would be unreadable
+  on its own panels is refused, so a theme can never hide the controls needed to switch it. The chosen theme is
+  remembered in a one-line text file next to the themes folder.
 - **Supply chain.** Dependencies are pinned (`SOLOMON_JUCE_TAG`; the vendored oscillator code is pinned by commit
   in `tools/vendor_mutable.sh` and each file keeps its license header), GitHub Actions are pinned to commit SHAs
   and kept up to date by Dependabot, and the workflow token is read-only by default. Third-party components

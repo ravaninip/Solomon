@@ -14,7 +14,10 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and 
 - Presets: 13 factory presets, user presets saved as files, previous/next buttons.
 - Editor: control names that follow the selected oscillator model, live filter response curve, envelope
   shape views, voice lamps and output meter, live modulation source bars, bipolar matrix sliders.
+- Colour themes: three built-in themes, a theme menu in the editor and user themes loaded from JSON files
+  (strictly validated, readability-checked), designed with the separate Theme Studio.
 - Vendored MIT-licensed oscillator code with a reproducible import script.
+- Windows build: GCC-only attributes in the vendored oscillator code are removed on MSVC.
 - Initial project structure.
 
 [Unreleased]: https://github.com/ravaninip/Solomon/commits/main
