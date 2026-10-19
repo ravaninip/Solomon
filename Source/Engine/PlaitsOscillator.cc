@@ -42,6 +42,68 @@ constexpr float kOutGain[kNumModels] = {
 };
 } // namespace
 
+namespace
+{
+constexpr ControlInfo kControls[kNumModels][3] = {
+    /* Analog + Filter  */ { { "Response", "Character of the built-in filter" },
+                             { "Cutoff", "Cutoff of the built-in filter" },
+                             { "Waveform", "Saw, square and pulse, with a sub oscillator" } },
+    /* Phase Distortion */ { { "Ratio", "Frequency ratio of the modulating wave" },
+                             { "Distortion", "Amount of phase distortion and modulation" },
+                             { "Asymmetry", "Pulse width of the modulating wave" } },
+    /* Wave Terrain     */ { { "Terrain", "Selects the terrain that is scanned" },
+                             { "Radius", "Size of the path scanned across the terrain" },
+                             { "Offset", "Shifts the scanned path" } },
+    /* String Machine   */ { { "Chord", "Chord played by the divide-down oscillators" },
+                             { "Filter", "Filter cutoff and chorus depth" },
+                             { "Registration", "Mix of saw and square harmonics, organ style" } },
+    /* Chiptune         */ { { "Chord", "Notes of the chord / arpeggio" },
+                             { "Arpeggio", "Arpeggio pattern and chord inversion" },
+                             { "Pulse", "Pulse width and waveform shape" } },
+    /* Virtual Analog   */ { { "Detune", "Interval of the second oscillator" },
+                             { "Square", "Shape and sync of the variable square" },
+                             { "Saw", "Shape of the variable saw" } },
+    /* Waveshaper       */ { { "Shape", "Curve of the waveshaper" },
+                             { "Fold", "Wavefolder amount and overtones" },
+                             { "Asymmetry", "Asymmetry of the source wave" } },
+    /* FM               */ { { "Ratio", "Carrier to modulator frequency ratio" },
+                             { "FM Amount", "Modulation index" },
+                             { "Feedback", "Feedback of the modulator (centre = none)" } },
+    /* Granular         */ { { "Formant Ratio", "Ratio between the two formants" },
+                             { "Formant Freq", "Frequency of the formants" },
+                             { "Width", "Width and shape of the grains" } },
+    /* Additive         */ { { "Bumps", "Number of peaks in the harmonic spectrum" },
+                             { "Centroid", "Position of the brightest harmonic" },
+                             { "Slope", "How quickly the harmonics fade out" } },
+    /* Wavetable        */ { { "Bank", "Wavetable bank" },
+                             { "Wave X", "Position along the first table axis" },
+                             { "Wave Y", "Position along the second table axis" } },
+    /* Chords           */ { { "Chord", "Chord type" },
+                             { "Inversion", "Chord inversion and spread" },
+                             { "Waveform", "Organ registration morphing into wavetable waves" } },
+    /* Swarm            */ { { "Spread", "Random pitch spread of the grains" },
+                             { "Density", "Grain rate" },
+                             { "Grain Size", "Grain duration and overlap" } },
+    /* Noise            */ { { "Filter", "Filter response and spacing of the two filters" },
+                             { "Clock", "Clock frequency of the noise source" },
+                             { "Resonance", "Filter resonance" } },
+    /* Particles        */ { { "Spread", "Random pitch spread of the particles" },
+                             { "Density", "How often particles fire" },
+                             { "Diffusion", "Below centre: diffusion. Above centre: filter resonance" } },
+    /* Plucked String   */ { { "Structure", "String structure and inharmonicity" },
+                             { "Brightness", "Brightness of the pluck" },
+                             { "Damping", "How fast the string decays" } },
+    /* Modal Resonator  */ { { "Structure", "Inharmonic structure of the resonator" },
+                             { "Brightness", "Brightness of the strike" },
+                             { "Damping", "How fast the resonator decays" } },
+};
+} // namespace
+
+const ControlInfo& modelControl (int model, int control)
+{
+    return kControls[std::clamp (model, 0, kNumModels - 1)][std::clamp (control, 0, 2)];
+}
+
 const char* modelName (int model)
 {
     return kModelNames[std::clamp (model, 0, kNumModels - 1)];

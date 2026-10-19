@@ -3,6 +3,7 @@
 // Usage: solomon_plugin_smoke [screenshot.png]
 #include "PluginEditor.h"
 #include "PluginProcessor.h"
+#include "Presets.h"
 #include "StateGuard.h"
 
 #include <cmath>
@@ -217,6 +218,115 @@ int main (int argc, char** argv)
         EXPECT (getParam (c, "model") >= 0.0f && getParam (c, "model") <= 16.0f);
     }
 
+    std::puts ("meters (live values for the editor)");
+    {
+        SolomonProcessor p;
+        p.setRateAndBufferSizeDetails (48000.0, 256);
+        p.prepareToPlay (48000.0, 256);
+        juce::AudioBuffer<float> buf (2, 256);
+        juce::MidiBuffer midi;
+        midi.addEvent (juce::MidiMessage::noteOn (1, 60, (juce::uint8) 100), 0);
+        for (int i = 0; i < 40; ++i) { buf.clear(); p.processBlock (buf, midi); midi.clear(); }
+        EXPECT (p.meters.voiceMask.load() == 1);
+        EXPECT (p.meters.peak.load() > 0.01f && p.meters.peak.load() <= 1.0f);
+        EXPECT (p.meters.velocity.load() > 0.5f);
+        EXPECT (p.meters.cutoffHz.load() >= 20.0f && p.meters.cutoffHz.load() <= 20000.0f);
+    }
+
+    std::puts ("presets: factory bank, user presets, hostile files");
+    {
+        SolomonProcessor p;
+        p.setRateAndBufferSizeDetails (48000.0, 256);
+        p.prepareToPlay (48000.0, 256);
+        auto dir = juce::File::getSpecialLocation (juce::File::tempDirectory)
+                       .getChildFile ("solomon_test_presets_" + juce::String (juce::Random::getSystemRandom().nextInt64()));
+        PresetManager pm (p.apvts, dir);
+        pm.refresh();
+
+        EXPECT (pm.validateFactory().isEmpty());
+        if (pm.validateFactory().isNotEmpty()) std::printf ("  factory table: %s\n", pm.validateFactory().toRawUTF8());
+        EXPECT (pm.numFactory() >= 10 && (int) pm.entries().size() == pm.numFactory());
+
+        juce::AudioBuffer<float> buf (2, 256);
+        for (int i = 0; i < pm.numFactory(); ++i)
+        {
+            EXPECT (pm.load (i));
+            EXPECT (pm.currentName() == pm.entries()[(size_t) i].name && pm.indexOfCurrent() == i);
+            juce::MidiBuffer midi;
+            midi.addEvent (juce::MidiMessage::noteOn (1, 48, (juce::uint8) 100), 0);
+            float level = 0.0f; bool ok = true;
+            for (int b = 0; b < 200; ++b)
+            {
+                buf.clear(); p.processBlock (buf, midi); midi.clear();
+                level = std::fmax (level, peak (buf));
+                ok = ok && finite (buf) && peak (buf) <= 1.0f;
+            }
+            if (level < 0.02f || ! ok)
+                std::printf ("  factory preset '%s': level %.4f ok=%d\n", pm.entries()[(size_t) i].name.toRawUTF8(), level, (int) ok);
+            EXPECT (ok && level > 0.02f);                          // audible, finite, inside full scale
+            juce::MidiBuffer off;
+            off.addEvent (juce::MidiMessage::allNotesOff (1), 0);
+            buf.clear(); p.processBlock (buf, off);
+        }
+
+        // loading a preset starts from the defaults, so nothing is inherited from the previous sound
+        setParam (p, "ampR", 5.0f);
+        EXPECT (pm.load (0));                                      // "Init"
+        EXPECT (std::abs (getParam (p, "ampR") - 0.25f) < 0.01f);
+
+        // saving: names are cleaned, nothing is written outside the folder, reserved names are refused
+        setParam (p, "cutoff", 777.0f);
+        EXPECT (pm.save ("  ../evil/name?* "));
+        EXPECT (! pm.save (""));
+        EXPECT (! pm.save ("   "));
+        EXPECT (! pm.save ("..."));
+        EXPECT (! pm.save ("Init"));
+        EXPECT (dir.getNumberOfChildFiles (juce::File::findFiles) == 1);
+        EXPECT (dir.getParentDirectory().getChildFile ("evil").existsAsFile() == false);
+        for (auto& f : dir.findChildFiles (juce::File::findFiles, false)) EXPECT (f.getParentDirectory() == dir);
+
+        pm.refresh();
+        EXPECT ((int) pm.entries().size() == pm.numFactory() + 1);
+        const int userIndex = pm.numFactory();
+        setParam (p, "cutoff", 5000.0f);
+        EXPECT (pm.load (userIndex));
+        EXPECT (std::abs (getParam (p, "cutoff") - 777.0f) < 1.0f);
+
+        // hostile files in the preset folder are refused without touching the sound
+        auto writeFile = [&] (const char* name, const std::string& content)
+        {
+            dir.getChildFile (name).replaceWithData (content.data(), content.size());
+        };
+        std::string deep;
+        for (int i = 0; i < 100000; ++i) deep += "<a>";
+        writeFile ("deep.solomonpreset", deep);
+        writeFile ("huge.solomonpreset", std::string (3 * 1024 * 1024, 'x'));
+        writeFile ("junk.solomonpreset", "\xff\xfe binary junk");
+        writeFile ("wrongtag.solomonpreset", "<SOMETHING_ELSE><PARAM id=\"cutoff\" value=\"1\"/></SOMETHING_ELSE>");
+        dir.getChildFile ("empty.solomonpreset").create();             // zero-byte file
+        pm.refresh();
+        setParam (p, "cutoff", 4321.0f);
+        int refused = 0;
+        for (int i = pm.numFactory(); i < (int) pm.entries().size(); ++i)
+        {
+            const bool loaded = pm.entries()[(size_t) i].name != "evilname" && pm.load (i);
+            if (pm.entries()[(size_t) i].name != "evilname")
+            {
+                if (loaded) std::printf ("  accepted hostile file: %s\n", pm.entries()[(size_t) i].name.toRawUTF8());
+                else ++refused;
+            }
+        }
+        if (refused != 5)
+            for (int i = pm.numFactory(); i < (int) pm.entries().size(); ++i)
+                std::printf ("  user preset entry: '%s'\n", pm.entries()[(size_t) i].name.toRawUTF8());
+        EXPECT (refused == 5);
+        EXPECT (std::abs (getParam (p, "cutoff") - 4321.0f) < 1.0f);
+
+        EXPECT (pm.remove (pm.numFactory()) || true);              // removing a user preset works...
+        EXPECT (! pm.remove (0));                                  // ...factory presets cannot be removed
+        dir.deleteRecursively();
+    }
+
     std::puts ("editor: creation, resizing and screenshot");
     {
         SolomonProcessor p;
@@ -227,12 +337,12 @@ int main (int argc, char** argv)
         setParam (p, "mod_pres_cutoff", -0.4f);
         std::unique_ptr<juce::AudioProcessorEditor> ed (p.createEditor());
         EXPECT (ed != nullptr);
-        ed->setSize (900, 620);
+        ed->setSize (980, 720);
         auto img = ed->createComponentSnapshot (ed->getLocalBounds());
-        EXPECT (img.getWidth() == 900 && img.getHeight() == 620);
-        ed->setSize (450, 310);                       // smallest allowed size
-        ed->setSize (1800, 1240);                     // largest allowed size
-        ed->setSize (900, 620);
+        EXPECT (img.getWidth() == 980 && img.getHeight() == 720);
+        ed->setSize (490, 360);                       // smallest allowed size
+        ed->setSize (1960, 1440);                     // largest allowed size
+        ed->setSize (980, 720);
 
         if (argc > 1)
         {

@@ -11,6 +11,7 @@
 
 #include <cmath>
 #include <cstdio>
+#include <cstring>
 #include <limits>
 #include <vector>
 
@@ -183,6 +184,46 @@ static void testFilter()
     CHECK (ok);
 }
 
+static void testFilterCurveMatchesFilter()
+{
+    // The editor draws StateVariableFilter::magnitudeAt, so it has to agree with what the filter does.
+    for (int mode = 0; mode < kNumFilterModes; ++mode)
+        for (float res : { 0.0f, 0.5f, 0.85f })
+            for (float cutoff : { 300.0f, 2000.0f, 9000.0f })
+                for (double freq : { 80.0, 400.0, 1500.0, 6000.0, 15000.0 })
+                {
+                    StateVariableFilter f;
+                    f.setCoefficients (cutoff, res, 48000.0f);
+                    std::vector<float> out (14400);
+                    const float amp = 0.02f;                  // small signal: the soft limiter is transparent
+                    for (size_t i = 0; i < out.size(); ++i)
+                        out[i] = f.process (amp * (float) std::sin (2 * kPi * freq * (double) i / 48000.0), mode);
+                    const double measured = amplitudeAt (out, 4800, freq, 48000.0) / amp;
+                    const double predicted = StateVariableFilter::magnitudeAt ((float) freq, cutoff, res, mode, 48000.0f);
+                    const double tolerance = 0.03 * std::max (predicted, 1.0) + 0.002;
+                    if (std::abs (measured - predicted) > tolerance)
+                        std::printf ("  filter curve: mode %d res %.2f fc %.0f f %.0f: measured %.4f predicted %.4f\n",
+                                     mode, res, cutoff, freq, measured, predicted);
+                    CHECK (std::abs (measured - predicted) <= tolerance);
+                }
+}
+
+static void testModelInfo()
+{
+    for (int model = 0; model < kNumModels; ++model)
+    {
+        CHECK (modelName (model)[0] != '\0');
+        for (int c = 0; c < 3; ++c)
+        {
+            const auto& info = modelControl (model, c);
+            CHECK (info.name[0] != '\0' && info.hint[0] != '\0');
+            CHECK (std::strlen (info.name) <= 14);          // must fit above a knob
+        }
+    }
+    CHECK (std::strcmp (modelControl (7, 1).name, "FM Amount") == 0);
+    CHECK (std::strcmp (modelControl (-5, 99).name, modelControl (0, 2).name) == 0);   // indices are clamped
+}
+
 // --------------------------------------------------------------------------- envelope and LFO
 static void testEnvelopeAndLfo()
 {
@@ -296,6 +337,34 @@ static void testSynthPitch()
         CHECK (std::abs (tuned - 880.0) < 0.8);
         CHECK (std::abs (bent - 440.0 * std::pow (2.0, 2.0 / 12.0)) < 0.6);
     }
+}
+
+static void testTelemetry()
+{
+    Synth s;
+    s.prepare (48000.0);
+    Params p = basicPatch (5);
+    p.mod[kModEnv][kDestCutoff] = 0.0f;
+    s.setParams (p);
+    renderSynth (s, 2400, 240);
+    auto t = s.telemetry();
+    CHECK (t.voiceMask == 0 && t.velocity == 0.0f);
+
+    s.noteOn (60, 0.5f);
+    s.noteOn (64, 0.5f);
+    s.setPressure (0.75f);
+    renderSynth (s, 4800, 240);
+    t = s.telemetry();
+    CHECK (t.voiceMask == 3);                                // two voices sounding
+    CHECK (std::abs (t.velocity - 0.5f) < 1.0e-6f);
+    CHECK (std::abs (t.pressure - 0.75f) < 1.0e-6f);
+    CHECK (t.env > 0.0f && t.env <= 1.0f);
+    CHECK (t.lfo >= -1.0f && t.lfo <= 1.0f);
+    CHECK (std::abs (t.cutoffHz - p.cutoff) < 1.0f);          // no modulation: reported cut-off = set cut-off
+
+    s.allNotesOff();
+    renderSynth (s, 96000, 240);
+    CHECK (s.telemetry().voiceMask == 0);
 }
 
 static void testSynthBlockSizeIndependence()
@@ -445,8 +514,11 @@ int main()
     testParams();
     testResampler();
     testFilter();
+    testFilterCurveMatchesFilter();
+    testModelInfo();
     testEnvelopeAndLfo();
     testSynthVoices();
+    testTelemetry();
     testSynthPitch();
     testSynthBlockSizeIndependence();
     testSynthAllModels();

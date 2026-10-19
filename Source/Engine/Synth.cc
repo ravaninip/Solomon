@@ -180,12 +180,20 @@ void Synth::renderCore (float* dst, int n)
     const float harmonicsM = clamp01 (harmonics + mod[kDestHarmonics]);
     const float cutoffHz = std::clamp (std::exp2 (logCutoff + kModOctaves * mod[kDestCutoff]), 20.0f, 20000.0f);
 
+    lastTelemetry.cutoffHz = cutoffHz;
+    lastTelemetry.lfo = lfoValue;
+    lastTelemetry.env = envValue;
+    lastTelemetry.velocity = lastVelocity;
+    lastTelemetry.pressure = sources[kModPressure];
+    lastTelemetry.voiceMask = 0;
+
     // ---- audio rate: voices
     float mix[kBlockSize] = {};
     float osc[kBlockSize];
     for (auto& v : voices)
     {
         if (! v.amp.active()) continue;
+        lastTelemetry.voiceMask |= 1 << (int) (&v - voices.data());
 
         const auto gate = v.fresh ? PlaitsOscillator::Gate::Rising
                         : v.gate  ? PlaitsOscillator::Gate::High

@@ -10,6 +10,15 @@ constexpr int kNumModels = 17;
 // Display name of a model (index clamped to the valid range).
 const char* modelName (int model);
 
+// What the three macro controls (0 = Harmonics, 1 = Timbre, 2 = Morph) do in each model. The names and
+// hints were derived from reading the model source code; they are shown in the editor.
+struct ControlInfo
+{
+    const char* name;
+    const char* hint;
+};
+const ControlInfo& modelControl (int model, int control);
+
 // Samples the oscillator renders per call at most. The synth core always runs at kCoreRate.
 constexpr int kBlockSize = 24;
 constexpr double kCoreRate = 48000.0;

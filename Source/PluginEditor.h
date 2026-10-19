@@ -1,10 +1,13 @@
 #pragma once
+#include <array>
 #include <memory>
 #include <vector>
 
 #include "PluginProcessor.h"
+#include "Widgets.h"
 
-class SolomonEditor : public juce::AudioProcessorEditor
+class SolomonEditor : public juce::AudioProcessorEditor,
+                      private juce::Timer
 {
 public:
     explicit SolomonEditor (SolomonProcessor&);
@@ -32,11 +35,24 @@ private:
     {
     public:
         Look();
+        // Bipolar horizontal sliders (the modulation matrix): the bar grows from the centre.
+        void drawLinearSlider (juce::Graphics&, int x, int y, int width, int height, float sliderPos,
+                               float minSliderPos, float maxSliderPos, juce::Slider::SliderStyle, juce::Slider&) override;
     };
 
     Knob& addKnob (const juce::String& paramId, const juce::String& text, const juce::String& tip, bool horizontal = false);
     Choice& addChoice (const juce::String& paramId, const juce::String& text, const juce::String& tip);
     void layoutRow (juce::Rectangle<int> area, std::vector<Knob*> knobs);
+
+    void timerCallback() override;
+    void updateModelLabels();
+    void rebuildPresetMenu();
+    void selectPreset (int entryIndex);
+    void stepPreset (int direction);
+    void askToSavePreset();
+    void say (const juce::String& message);
+
+    float param (const char* id) const;
 
     SolomonProcessor& proc;
     Look look;
@@ -50,6 +66,16 @@ private:
     Knob *fltA = nullptr, *fltD = nullptr, *fltS = nullptr, *fltR = nullptr;
     Knob* mod[solomon::kNumModSources][solomon::kNumModDests] = {};
     Choice *model = nullptr, *filterMode = nullptr, *lfoShape = nullptr;
+
+    juce::ComboBox presetBox;
+    juce::TextButton prevButton { "<" }, nextButton { ">" }, saveButton { "Save" };
+    juce::Label presetNote;
+    int shownModel = -1, shownPreset = -2, noteCountdown = 0;
+
+    ui::FilterCurve filterCurve;
+    ui::EnvelopeView ampView, fltView;
+    ui::VoiceAndLevel voiceMeter;
+    std::array<std::unique_ptr<ui::SourceBar>, solomon::kNumModSources> sourceBars;
 
     std::vector<juce::Rectangle<int>> panels;
     juce::Label title, oscHeader, filterHeader, ampHeader, fltEnvHeader, lfoHeader, matrixHeader;

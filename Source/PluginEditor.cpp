@@ -9,8 +9,10 @@ const juce::Colour kPanel { 0xff1d232b };
 const juce::Colour kAccent { 0xff3ddc97 };
 const juce::Colour kText { 0xffe6ebf0 };
 const juce::Colour kDim { 0xff8b97a5 };
+const juce::Colour kWell { 0xff12161b };
+const juce::Colour kWarm { 0xffffa94d };
 
-constexpr int kBaseWidth = 900, kBaseHeight = 620;
+constexpr int kBaseWidth = 980, kBaseHeight = 720;
 
 void styleHeader (juce::Label& l, const juce::String& text)
 {
@@ -38,6 +40,31 @@ SolomonEditor::Look::Look()
     setColour (juce::PopupMenu::highlightedBackgroundColourId, kAccent.withAlpha (0.35f));
     setColour (juce::TooltipWindow::backgroundColourId, juce::Colour (0xff232a33));
     setColour (juce::TooltipWindow::textColourId, kText);
+}
+
+
+void SolomonEditor::Look::drawLinearSlider (juce::Graphics& g, int x, int y, int width, int height, float sliderPos,
+                                            float minSliderPos, float maxSliderPos, juce::Slider::SliderStyle style,
+                                            juce::Slider& slider)
+{
+    if (style != juce::Slider::LinearHorizontal)
+    {
+        LookAndFeel_V4::drawLinearSlider (g, x, y, width, height, sliderPos, minSliderPos, maxSliderPos, style, slider);
+        return;
+    }
+    const float cy = (float) y + (float) height * 0.5f;
+    const float centre = (float) x + (float) width * 0.5f;       // matrix ranges are symmetric: 0 sits in the middle
+    juce::Rectangle<float> track ((float) x, cy - 3.0f, (float) width, 6.0f);
+    g.setColour (kWell);
+    g.fillRoundedRectangle (track, 3.0f);
+
+    const bool active = std::abs (sliderPos - centre) > 1.0f;
+    g.setColour (sliderPos >= centre ? kAccent : kWarm);
+    g.fillRect (juce::Rectangle<float> (juce::jmin (centre, sliderPos), cy - 3.0f, std::abs (sliderPos - centre), 6.0f));
+    g.setColour (kDim);
+    g.drawVerticalLine ((int) centre, cy - 6.0f, cy + 6.0f);
+    g.setColour (active ? kText : kDim);
+    g.fillEllipse (sliderPos - 5.0f, cy - 5.0f, 10.0f, 10.0f);
 }
 
 namespace
@@ -107,6 +134,12 @@ SolomonEditor::Choice& SolomonEditor::addChoice (const juce::String& paramId, co
     return *choices.back();
 }
 
+
+float SolomonEditor::param (const char* id) const
+{
+    return proc.apvts.getRawParameterValue (id)->load();
+}
+
 SolomonEditor::SolomonEditor (SolomonProcessor& p)
     : AudioProcessorEditor (p), proc (p)
 {
@@ -121,12 +154,12 @@ SolomonEditor::SolomonEditor (SolomonProcessor& p)
     filterMode = &addChoice ("filterMode", "Filter", "Filter type");
     lfoShape = &addChoice ("lfoShape", "LFO shape", "Waveform of the LFO");
 
-    harmonics = &addKnob ("harmonics", "Harmonics", "First oscillator control (model dependent)");
-    timbre = &addKnob ("timbre", "Timbre", "Second oscillator control (model dependent)");
-    morph = &addKnob ("morph", "Morph", "Third oscillator control (model dependent)");
+    harmonics = &addKnob ("harmonics", "Harmonics", "");
+    timbre = &addKnob ("timbre", "Timbre", "");
+    morph = &addKnob ("morph", "Morph", "");
     tune = &addKnob ("tune", "Tune", "Pitch offset in semitones");
     volume = &addKnob ("volume", "Volume", "Output level");
-    cutoff = &addKnob ("cutoff", "Cutoff", "Filter cut-off frequency");
+    cutoff = &addKnob ("cutoff", "Cutoff", "Filter cut-off frequency (the bright curve shows the modulated value)");
     resonance = &addKnob ("resonance", "Resonance", "Filter resonance");
     lfoRate = &addKnob ("lfoRate", "Rate", "LFO speed");
 
@@ -144,15 +177,17 @@ SolomonEditor::SolomonEditor (SolomonProcessor& p)
 
     styleHeader (oscHeader, "OSCILLATOR");     styleHeader (filterHeader, "FILTER");
     styleHeader (ampHeader, "AMP ENVELOPE");   styleHeader (fltEnvHeader, "FILTER ENVELOPE");
-    styleHeader (lfoHeader, "LFO");            styleHeader (matrixHeader, "MODULATION MATRIX  (aftertouch / mod wheel = Pressure)");
+    styleHeader (lfoHeader, "LFO");            styleHeader (matrixHeader, "MODULATION MATRIX   (the bars on the left show each source live; aftertouch and mod wheel feed Pressure)");
     for (auto* l : { &oscHeader, &filterHeader, &ampHeader, &fltEnvHeader, &lfoHeader, &matrixHeader })
         addAndMakeVisible (l);
     for (int s = 0; s < kNumModSources; ++s)
     {
         sourceLabels[s].setText (srcNames[s], juce::dontSendNotification);
-        sourceLabels[s].setJustificationType (juce::Justification::centredRight);
+        sourceLabels[s].setJustificationType (juce::Justification::centredLeft);
         sourceLabels[s].setFont (juce::FontOptions (12.0f));
         addAndMakeVisible (sourceLabels[s]);
+        sourceBars[(size_t) s] = std::make_unique<ui::SourceBar> (s == kModLfo);
+        addAndMakeVisible (*sourceBars[(size_t) s]);
     }
     for (int d = 0; d < kNumModDests; ++d)
     {
@@ -162,14 +197,41 @@ SolomonEditor::SolomonEditor (SolomonProcessor& p)
         addAndMakeVisible (destLabels[d]);
     }
 
+    filterCurve.settings = [this] { return ui::FilterCurve::Settings { param ("cutoff"), param ("resonance"), (int) param ("filterMode") }; };
+    ampView.adsr = [this] { return ui::EnvelopeView::Adsr { param ("ampA"), param ("ampD"), param ("ampS"), param ("ampR") }; };
+    fltView.adsr = [this] { return ui::EnvelopeView::Adsr { param ("fltA"), param ("fltD"), param ("fltS"), param ("fltR") }; };
+    for (auto* c : std::initializer_list<juce::Component*> { &filterCurve, &ampView, &fltView, &voiceMeter })
+        addAndMakeVisible (c);
+    filterCurve.setTooltip ("Filter response. Dim curve: the cut-off you set. Bright curve: the cut-off now, after modulation.");
+    voiceMeter.setTooltip ("Sounding voices and output level");
+
+    // presets
+    proc.presets.refresh();
+    presetBox.setTextWhenNothingSelected ("Sound");
+    presetBox.onChange = [this] { selectPreset (presetBox.getSelectedId() - 1); };
+    presetBox.setTooltip ("Choose a sound. Presets are starting points: edit them and save your own.");
+    prevButton.setTooltip ("Previous preset");  prevButton.onClick = [this] { stepPreset (-1); };
+    nextButton.setTooltip ("Next preset");      nextButton.onClick = [this] { stepPreset (+1); };
+    saveButton.setTooltip ("Save the current sound as a user preset");
+    saveButton.onClick = [this] { askToSavePreset(); };
+    presetNote.setFont (juce::FontOptions (11.0f));
+    presetNote.setColour (juce::Label::textColourId, kDim);
+    for (auto* c : std::initializer_list<juce::Component*> { &presetBox, &prevButton, &nextButton, &saveButton, &presetNote })
+        addAndMakeVisible (c);
+    rebuildPresetMenu();
+
+    updateModelLabels();
+
     setResizable (true, true);
     setResizeLimits (kBaseWidth / 2, kBaseHeight / 2, kBaseWidth * 2, kBaseHeight * 2);
     getConstrainer()->setFixedAspectRatio ((double) kBaseWidth / kBaseHeight);
     setSize (kBaseWidth, kBaseHeight);
+    startTimerHz (30);
 }
 
 SolomonEditor::~SolomonEditor()
 {
+    stopTimer();
     setLookAndFeel (nullptr);
 }
 
@@ -181,6 +243,117 @@ void SolomonEditor::paint (juce::Graphics& g)
         g.fillRoundedRectangle (r.toFloat(), 8.0f);
 }
 
+// ------------------------------------------------------------------------ live updates
+void SolomonEditor::updateModelLabels()
+{
+    shownModel = juce::jlimit (0, solomon::kNumModels - 1, (int) param ("model"));
+    Knob* macro[3] = { harmonics, timbre, morph };
+    for (int c = 0; c < 3; ++c)
+    {
+        const auto& info = solomon::modelControl (shownModel, c);
+        macro[c]->label.setText (info.name, juce::dontSendNotification);
+        macro[c]->slider.setTooltip (juce::String (info.hint) + " (" + solomon::modelName (shownModel) + ")");
+    }
+}
+
+void SolomonEditor::timerCallback()
+{
+    if ((int) param ("model") != shownModel)
+        updateModelLabels();
+
+    const auto& m = proc.meters;
+    filterCurve.setLiveCutoff (m.cutoffHz.load (std::memory_order_relaxed));
+    filterCurve.repaint();
+    voiceMeter.set (m.voiceMask.load (std::memory_order_relaxed), m.peak.load (std::memory_order_relaxed));
+    sourceBars[kModLfo]->set (m.lfo.load (std::memory_order_relaxed));
+    sourceBars[kModEnv]->set (m.env.load (std::memory_order_relaxed));
+    sourceBars[kModVelocity]->set (m.velocity.load (std::memory_order_relaxed));
+    sourceBars[kModPressure]->set (m.pressure.load (std::memory_order_relaxed));
+    ampView.repaint();
+    fltView.repaint();
+
+    // keep the preset box in step with the session (the host can reload the state at any time)
+    const int current = proc.presets.indexOfCurrent();
+    if (current != shownPreset)
+        rebuildPresetMenu();
+    if (noteCountdown > 0 && --noteCountdown == 0)
+        presetNote.setText ({}, juce::dontSendNotification);
+}
+
+// ------------------------------------------------------------------------ presets
+void SolomonEditor::say (const juce::String& message)
+{
+    presetNote.setText (message, juce::dontSendNotification);
+    noteCountdown = 30 * 4;
+}
+
+void SolomonEditor::rebuildPresetMenu()
+{
+    presetBox.clear (juce::dontSendNotification);
+    const auto& list = proc.presets.entries();
+    presetBox.addSectionHeading ("Factory");
+    for (int i = 0; i < proc.presets.numFactory(); ++i)
+        presetBox.addItem (list[(size_t) i].name, i + 1);
+    if ((int) list.size() > proc.presets.numFactory())
+    {
+        presetBox.addSectionHeading ("User");
+        for (int i = proc.presets.numFactory(); i < (int) list.size(); ++i)
+            presetBox.addItem (list[(size_t) i].name, i + 1);
+    }
+
+    shownPreset = proc.presets.indexOfCurrent();
+    if (shownPreset >= 0)
+        presetBox.setSelectedId (shownPreset + 1, juce::dontSendNotification);
+    else
+    {
+        presetBox.setSelectedId (0, juce::dontSendNotification);
+        const auto name = proc.presets.currentName();
+        presetBox.setTextWhenNothingSelected (name.isEmpty() ? juce::String ("Sound") : name);
+    }
+}
+
+void SolomonEditor::selectPreset (int entryIndex)
+{
+    if (entryIndex < 0) return;
+    if (! proc.presets.load (entryIndex))
+        say ("Could not load that preset");
+    updateModelLabels();
+    shownPreset = -2;                        // refresh the box on the next tick
+}
+
+void SolomonEditor::stepPreset (int direction)
+{
+    const int n = (int) proc.presets.entries().size();
+    if (n == 0) return;
+    const int current = proc.presets.indexOfCurrent();
+    selectPreset (current < 0 ? (direction > 0 ? 0 : n - 1) : (current + direction + n) % n);
+}
+
+void SolomonEditor::askToSavePreset()
+{
+    auto* window = new juce::AlertWindow ("Save preset",
+                                          "Name of the preset. A user preset with the same name is replaced.\n"
+                                          "Saved in: " + proc.presets.folder().getFullPathName(),
+                                          juce::MessageBoxIconType::NoIcon, this);
+    const auto current = proc.presets.currentName();
+    window->addTextEditor ("name", current.isEmpty() ? juce::String ("My sound") : current);
+    window->addButton ("Save", 1, juce::KeyPress (juce::KeyPress::returnKey));
+    window->addButton ("Cancel", 0, juce::KeyPress (juce::KeyPress::escapeKey));
+
+    juce::Component::SafePointer<SolomonEditor> safe (this);
+    window->enterModalState (true, juce::ModalCallbackFunction::create ([safe, window] (int result)
+    {
+        if (result != 1 || safe == nullptr) return;
+        const auto name = window->getTextEditorContents ("name");
+        if (safe->proc.presets.save (name))
+            safe->say ("Saved \"" + PresetManager::cleanName (name) + "\"");
+        else
+            safe->say ("Could not save (empty or reserved name, or folder not writable)");
+        safe->shownPreset = -2;
+    }), true);
+}
+
+// ------------------------------------------------------------------------ layout
 void SolomonEditor::layoutRow (juce::Rectangle<int> area, std::vector<Knob*> row)
 {
     if (row.empty()) return;
@@ -198,31 +371,48 @@ void SolomonEditor::resized()
     panels.clear();
     auto area = getLocalBounds().reduced (14);
 
-    // top bar: title, oscillator model, volume
+    // top bar: title | presets | oscillator model | voices + level | volume
     auto top = area.removeFromTop (74);
-    title.setBounds (top.removeFromLeft (190));
-    auto vol = top.removeFromRight (100);
+    title.setBounds (top.removeFromLeft (150));
+
+    auto presetArea = top.removeFromLeft (330).withTrimmedTop (4);
+    {
+        auto line = presetArea.removeFromTop (32);
+        prevButton.setBounds (line.removeFromLeft (30));
+        line.removeFromLeft (4);
+        nextButton.setBounds (line.removeFromRight (30));
+        line.removeFromRight (4);
+        saveButton.setBounds (line.removeFromRight (62));
+        line.removeFromRight (4);
+        presetBox.setBounds (line);
+        presetNote.setBounds (presetArea.removeFromTop (18));
+    }
+    top.removeFromLeft (12);
+
+    auto vol = top.removeFromRight (90);
     volume->label.setBounds (vol.removeFromTop (14));
     volume->slider.setBounds (vol);
-    auto modelBox = top.removeFromLeft (260).withTrimmedLeft (10).withTrimmedTop (6);
+    auto meter = top.removeFromRight (110).withTrimmedTop (22).withTrimmedBottom (14).withTrimmedLeft (8);
+    voiceMeter.setBounds (meter);
+    auto modelBox = top.removeFromLeft (230).withTrimmedTop (6);
     model->label.setBounds (modelBox.removeFromTop (16));
     model->box.setBounds (modelBox.removeFromTop (30));
     area.removeFromTop (6);
 
     const int gap = 8;
     const int avail = area.getHeight() - 2 * gap;
-    auto row1 = area.removeFromTop (avail * 36 / 100);
+    auto row1 = area.removeFromTop (avail * 40 / 100);
     area.removeFromTop (gap);
-    auto row2 = area.removeFromTop (avail * 29 / 100);
+    auto row2 = area.removeFromTop (avail * 25 / 100);
     area.removeFromTop (gap);
     auto row3 = area;
 
-    // row 1: oscillator | filter | LFO
+    // row 1: oscillator | filter (with response curve) | LFO
     {
         const int total = row1.getWidth() - 2 * gap;
-        auto osc = row1.removeFromLeft (total * 38 / 100);
+        auto osc = row1.removeFromLeft (total * 36 / 100);
         row1.removeFromLeft (gap);
-        auto flt = row1.removeFromLeft (total * 40 / 100);
+        auto flt = row1.removeFromLeft (total * 42 / 100);
         row1.removeFromLeft (gap);
         auto lfo = row1;
         for (auto r : { osc, flt, lfo }) panels.push_back (r);
@@ -234,7 +424,9 @@ void SolomonEditor::resized()
         filterMode->box.setBounds (fh.removeFromRight (120));
         filterMode->label.setVisible (false);
         filterHeader.setBounds (fh);
-        layoutRow (flt.reduced (6, 0), { cutoff, resonance });
+        auto fbody = flt.reduced (8, 0);
+        filterCurve.setBounds (fbody.removeFromTop (fbody.getHeight() * 45 / 100).reduced (2, 2));
+        layoutRow (fbody, { cutoff, resonance });
 
         auto lh = lfo.removeFromTop (26).reduced (10, 2);
         lfoShape->box.setBounds (lh.removeFromRight (juce::jmin (112, lh.getWidth() - 40)));
@@ -243,17 +435,23 @@ void SolomonEditor::resized()
         layoutRow (lfo.reduced (6, 0), { lfoRate });
     }
 
-    // row 2: the two envelopes
+    // row 2: the two envelopes, knobs on the left and the shape on the right
     {
         auto amp = row2.removeFromLeft ((row2.getWidth() - gap) / 2);
         row2.removeFromLeft (gap);
         auto flt = row2;
         panels.push_back (amp);
         panels.push_back (flt);
+
         ampHeader.setBounds (amp.removeFromTop (26).reduced (10, 0));
-        layoutRow (amp.reduced (6, 0), { ampA, ampD, ampS, ampR });
+        auto ampBody = amp.reduced (6, 0);
+        ampView.setBounds (ampBody.removeFromRight (ampBody.getWidth() * 36 / 100).reduced (6, 6));
+        layoutRow (ampBody, { ampA, ampD, ampS, ampR });
+
         fltEnvHeader.setBounds (flt.removeFromTop (26).reduced (10, 0));
-        layoutRow (flt.reduced (6, 0), { fltA, fltD, fltS, fltR });
+        auto fltBody = flt.reduced (6, 0);
+        fltView.setBounds (fltBody.removeFromRight (fltBody.getWidth() * 36 / 100).reduced (6, 6));
+        layoutRow (fltBody, { fltA, fltD, fltS, fltR });
     }
 
     // row 3: modulation matrix (sources down, destinations across)
@@ -261,7 +459,7 @@ void SolomonEditor::resized()
         panels.push_back (row3);
         matrixHeader.setBounds (row3.removeFromTop (26).reduced (10, 0));
         auto grid = row3.reduced (10, 2);
-        auto labelCol = grid.removeFromLeft (80);
+        auto labelCol = grid.removeFromLeft (110);
         auto head = grid.removeFromTop (18);
         const int cw = grid.getWidth() / kNumModDests;
         for (int d = 0; d < kNumModDests; ++d)
@@ -270,7 +468,9 @@ void SolomonEditor::resized()
         const int rh = grid.getHeight() / kNumModSources;
         for (int s = 0; s < kNumModSources; ++s)
         {
-            sourceLabels[s].setBounds (labelCol.removeFromTop (rh));
+            auto cellLabel = labelCol.removeFromTop (rh).reduced (0, 3);
+            sourceLabels[s].setBounds (cellLabel.removeFromTop (cellLabel.getHeight() / 2 + 2));
+            sourceBars[(size_t) s]->setBounds (cellLabel.reduced (2, 0).withTrimmedRight (6));
             auto rowArea = grid.removeFromTop (rh);
             for (int d = 0; d < kNumModDests; ++d)
             {

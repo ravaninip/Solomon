@@ -41,6 +41,18 @@ public:
 
     int activeVoices() const;
 
+    // Values from the most recently rendered block, for meters and displays in the editor.
+    struct Telemetry
+    {
+        float cutoffHz = 8000.0f;      // filter cut-off after modulation
+        float lfo = 0.0f;              // -1..1
+        float env = 0.0f;              // filter envelope, 0..1
+        float velocity = 0.0f;         // velocity of the last note, 0..1
+        float pressure = 0.0f;         // max (aftertouch, mod wheel), 0..1
+        int voiceMask = 0;             // bit n set = voice n sounding
+    };
+    Telemetry telemetry() const { return lastTelemetry; }
+
 private:
     struct Voice
     {
@@ -76,6 +88,7 @@ private:
     Smooth sHarm, sTimbre, sMorph, sTune, sLogCutoff, sRes, sVolume;
     float blockCoef = 0.05f;
 
+    Telemetry lastTelemetry;
     unsigned long long clock = 0;
     int lastVelocityNote = -1;
     float lastVelocity = 0.0f;

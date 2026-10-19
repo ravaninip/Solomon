@@ -41,6 +41,23 @@ public:
         }
     }
 
+    // Small-signal magnitude response (linear, no saturation) at `freq` for the given settings.
+    // This is what the editor draws, and the tests check it against the real filter.
+    static float magnitudeAt (float freq, float cutoffHz, float resonance, int mode, float sampleRate)
+    {
+        const float fc = std::clamp (cutoffHz, 10.0f, 0.45f * sampleRate);
+        const float k = 2.0f * (1.0f - 0.96f * std::clamp (resonance, 0.0f, 1.0f));
+        const float x = std::tan (3.14159265f * std::min (freq, 0.499f * sampleRate) / sampleRate)
+                      / std::tan (3.14159265f * fc / sampleRate);          // frequency relative to the cut-off
+        const float denom = std::sqrt ((1.0f - x * x) * (1.0f - x * x) + k * k * x * x);
+        switch (mode)
+        {
+            case kBandPass: return x / denom;
+            case kHighPass: return x * x / denom;
+            default:        return 1.0f / denom;
+        }
+    }
+
 private:
     // Soft limiter: transparent at normal levels (under 1% error up to |x| = 0.5) and bounded by 4,
     // so a strongly resonant filter compresses its peak instead of blowing up. It must stay this

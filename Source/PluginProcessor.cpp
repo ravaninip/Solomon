@@ -74,7 +74,8 @@ juce::AudioProcessorValueTreeState::ParameterLayout SolomonProcessor::createLayo
 
 SolomonProcessor::SolomonProcessor()
     : AudioProcessor (BusesProperties().withOutput ("Output", juce::AudioChannelSet::stereo(), true)),
-      apvts (*this, nullptr, "STATE", createLayout())
+      apvts (*this, nullptr, "STATE", createLayout()),
+      presets (apvts, PresetManager::defaultUserFolder())
 {
     auto get = [this] (const juce::String& pid) { return apvts.getRawParameterValue (pid); };
     p.model = get ("model");           p.harmonics = get ("harmonics");  p.timbre = get ("timbre");
@@ -172,6 +173,18 @@ void SolomonProcessor::processBlock (juce::AudioBuffer<float>& buffer, juce::Mid
 
     midi.clear();
     currentBuffer = nullptr;
+
+    const auto t = synth.telemetry();
+    meters.cutoffHz.store (t.cutoffHz, std::memory_order_relaxed);
+    meters.lfo.store (t.lfo, std::memory_order_relaxed);
+    meters.env.store (t.env, std::memory_order_relaxed);
+    meters.velocity.store (t.velocity, std::memory_order_relaxed);
+    meters.pressure.store (t.pressure, std::memory_order_relaxed);
+    meters.voiceMask.store (t.voiceMask, std::memory_order_relaxed);
+    float blockPeak = 0.0f;
+    for (int ch = 0; ch < buffer.getNumChannels(); ++ch)
+        blockPeak = juce::jmax (blockPeak, buffer.getMagnitude (ch, 0, total));
+    meters.peak.store (blockPeak, std::memory_order_relaxed);
 }
 
 juce::AudioProcessorEditor* SolomonProcessor::createEditor()

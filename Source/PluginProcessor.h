@@ -4,6 +4,7 @@
 #include <vector>
 
 #include "Engine/Synth.h"
+#include "Presets.h"
 
 class SolomonProcessor : public juce::AudioProcessor
 {
@@ -32,6 +33,15 @@ public:
     void setStateInformation (const void*, int) override;
 
     juce::AudioProcessorValueTreeState apvts;
+    PresetManager presets;
+
+    // Written by the audio thread after every block, read by the editor (relaxed atomics).
+    struct Meters
+    {
+        std::atomic<float> cutoffHz { 8000.0f }, lfo { 0.0f }, env { 0.0f }, velocity { 0.0f }, pressure { 0.0f };
+        std::atomic<float> peak { 0.0f };
+        std::atomic<int> voiceMask { 0 };
+    } meters;
 
     // Parameter ids of the modulation matrix cells, e.g. "mod_lfo_timbre".
     static juce::String modId (int source, int dest);
